@@ -1,0 +1,347 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import {
+  Check,
+  CircleAlert,
+  Expand,
+  LoaderCircle,
+  Play,
+  RotateCcw,
+  Smartphone,
+  Trophy,
+  Users,
+  WifiOff,
+  X,
+} from "lucide-react";
+
+import { CursorTagLogo } from "@/components/cursor-tag-logo";
+import { GAME_CONFIG, generateRoomCode, sanitizeRoomCode } from "@/lib/game/config";
+import { createRoomSocket, type RoomConnectionStatus, type RoomSocket } from "@/lib/realtime/room";
+import type { RoomPlayer, RoomSnapshot, ServerRoomMessage } from "@/lib/realtime/types";
+
+function emptySnapshot(): RoomSnapshot {
+  return {
+    phase: "lobby",
+    hostConnected: false,
+    players: [],
+    itPlayerId: null,
+    round: 0,
+    roundEndsAt: null,
+    roundDurationMs: null,
+    freezeUntil: null,
+    frozenPlayerIds: [],
+    impact: null,
+    maxPlayers: GAME_CONFIG.maxPlayers,
+    collisionRadius: GAME_CONFIG.collisionRadius,
+  };
+}
+
+export default function HostClient({ initialRoomCode }: { initialRoomCode: string }) {
+  const [roomCode, setRoomCode] = useState(() => sanitizeRoomCode(initialRoomCode));
+  const [roomUrl, setRoomUrl] = useState("");
+  const [status, setStatus] = useState<RoomConnectionStatus>("connecting");
+  const [snapshot, setSnapshot] = useState<RoomSnapshot>(emptySnapshot);
+  const [now, setNow] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  const socketRef = useRef<RoomSocket | null>(null);
+  const pendingCursorsRef = useRef<Record<string, { x: number; y: number }>>({});
+  const cursorFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const code = roomCode || generateRoomCode();
+      if (!roomCode) {
+        setRoomCode(code);
+        window.history.replaceState(null, "", `/host?room=${code}`);
+      }
+      setRoomUrl(`${window.location.origin}/room/${code}`);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [roomCode]);
+
+  useEffect(() => {
+    if (!roomCode) return;
+    const storageKey = `cursor-tag-host-${roomCode}`;
+    const hostId = sessionStorage.getItem(storageKey) ?? crypto.randomUUID();
+    sessionStorage.setItem(storageKey, hostId);
+
+    function handleMessage(message: ServerRoomMessage) {
+      if (message.type === "connected") {
+        setSnapshot(message.payload.snapshot);
+        if (message.payload.snapshot.phase === "playing") setNow(Date.now());
+      }
+      if (message.type === "snapshot" || message.type === "tag") {
+        pendingCursorsRef.current = {};
+        setSnapshot(message.payload);
+        if (message.payload.phase === "playing") setNow(Date.now());
+      }
+      if (message.type === "timeout") {
+        pendingCursorsRef.current = {};
+        setSnapshot(message.payload.snapshot);
+        setNow(Date.now());
+        const timedOut = message.payload.snapshot.players.find(
+          (player) => player.id === message.payload.timedOutPlayerId,
+        );
+        setNotice(`${timedOut?.name ?? "The chaser"} ran out of time −1`);
+        window.setTimeout(() => setNotice(null), 1_800);
+      }
+      if (message.type === "cursor") {
+        pendingCursorsRef.current[message.payload.playerId] = {
+          x: message.payload.x,
+          y: message.payload.y,
+        };
+        if (cursorFrameRef.current === null) {
+          cursorFrameRef.current = window.requestAnimationFrame(() => {
+            const positions = pendingCursorsRef.current;
+            pendingCursorsRef.current = {};
+            cursorFrameRef.current = null;
+            setSnapshot((current) => ({
+              ...current,
+              players: current.players.map((player) =>
+                positions[player.id]
+                  ? { ...player, position: positions[player.id] }
+                  : player,
+              ),
+            }));
+          });
+        }
+      }
+      if (message.type === "error") {
+        setNotice(message.message);
+        window.setTimeout(() => setNotice(null), 2_500);
+      }
+    }
+
+    const socket = createRoomSocket({
+      roomCode,
+      role: "host",
+      clientId: hostId,
+      onStatus: setStatus,
+      onMessage: handleMessage,
+      onOpen: () => socketRef.current?.send({ type: "request-snapshot" }),
+    });
+    socketRef.current = socket;
+    return () => {
+      if (cursorFrameRef.current !== null) {
+        window.cancelAnimationFrame(cursorFrameRef.current);
+        cursorFrameRef.current = null;
+      }
+      socket.close();
+      socketRef.current = null;
+    };
+  }, [roomCode]);
+
+  useEffect(() => {
+    if (snapshot.phase !== "playing") return;
+    const initialTimer = window.setTimeout(() => setNow(Date.now()), 0);
+    const timer = window.setInterval(() => setNow(Date.now()), 50);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
+  }, [snapshot.phase]);
+
+  useEffect(() => {
+    function sendViewport() {
+      socketRef.current?.send({
+        type: "host-viewport",
+        payload: { aspectRatio: window.innerWidth / Math.max(1, window.innerHeight) },
+      });
+    }
+    window.addEventListener("resize", sendViewport);
+    return () => window.removeEventListener("resize", sendViewport);
+  }, []);
+
+  async function startGame() {
+    try {
+      await document.documentElement.requestFullscreen?.();
+    } catch {
+      // Fullscreen is optional; gameplay still starts.
+    }
+    socketRef.current?.send({
+      type: "host-start",
+      payload: { aspectRatio: window.innerWidth / Math.max(1, window.innerHeight) },
+    });
+  }
+
+  if (!roomCode) return <div className="min-h-dvh bg-[#10120f]" />;
+
+  if (snapshot.phase === "playing") {
+    return (
+      <GameScreen
+        snapshot={snapshot}
+        now={now}
+        notice={notice}
+        onEnd={() => socketRef.current?.send({ type: "host-end" })}
+      />
+    );
+  }
+
+  if (snapshot.phase === "finished") {
+    return (
+      <ResultsScreen
+        players={snapshot.players}
+        onReset={() => socketRef.current?.send({ type: "host-reset" })}
+      />
+    );
+  }
+
+  const eligiblePlayers = snapshot.players.filter((player) => player.connected && player.calibrated);
+  const canStart = eligiblePlayers.length >= GAME_CONFIG.minPlayers && status === "connected";
+
+  return (
+    <main className="lobby-shell min-h-dvh overflow-hidden bg-[#10120f] text-[#f5f5ec]">
+      <div className="landing-grid fixed inset-0 opacity-25" />
+      <div className="relative mx-auto flex min-h-dvh max-w-[1440px] flex-col px-6 py-6 sm:px-10 lg:px-14">
+        <header className="flex items-center justify-between">
+          <CursorTagLogo />
+          <ConnectionPill status={status} />
+        </header>
+
+        <section className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[.86fr_1.14fr] lg:gap-12">
+          <div>
+            <span className="text-xs font-black uppercase tracking-[.22em] text-[#b7ff45]">Lobby open</span>
+            <h1 className="mt-4 text-5xl font-black leading-[.92] tracking-[-.06em] sm:text-7xl">
+              GET YOUR<br />CURSORS IN.
+            </h1>
+            <p className="mt-5 max-w-lg text-lg leading-relaxed text-white/48">
+              Scan with each phone, pick a name, then hold still to calibrate. The code disappears when the chase begins.
+            </p>
+
+            <div className="mt-8 flex flex-col gap-5 sm:flex-row sm:items-center">
+              <div className="rounded-[1.6rem] bg-white p-3 shadow-[0_16px_50px_rgba(0,0,0,.28)]">
+                {roomUrl ? <QRCodeSVG value={roomUrl} size={176} bgColor="#ffffff" fgColor="#10120f" level="M" /> : <div className="size-44 animate-pulse bg-black/5" />}
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[.18em] text-white/35">Room code</p>
+                <p className="mt-1 font-mono text-5xl font-black tracking-[.08em] text-[#b7ff45] sm:text-6xl">{roomCode}</p>
+                <p className="mt-2 text-sm font-semibold text-white/35">or visit this page and enter the code</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-white/10 bg-white/[.055] p-5 shadow-2xl backdrop-blur-sm sm:p-7">
+            <div className="flex items-end justify-between border-b border-white/8 pb-5">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[.18em] text-white/35">Players</p>
+                <p className="mt-1 text-3xl font-black tracking-[-.04em]">{snapshot.players.length} / {snapshot.maxPlayers}</p>
+              </div>
+              <Users className="size-7 text-[#7c5cff]" />
+            </div>
+
+            <div className="mt-5 grid min-h-64 content-start gap-3 sm:grid-cols-2">
+              {snapshot.players.length === 0 ? (
+                <div className="col-span-full grid min-h-56 place-items-center rounded-2xl border border-dashed border-white/12 text-center">
+                  <div><Smartphone className="mx-auto size-8 text-white/20" /><p className="mt-3 font-bold text-white/35">Waiting for the first phone…</p></div>
+                </div>
+              ) : snapshot.players.map((player) => <LobbyPlayer key={player.id} player={player} />)}
+            </div>
+
+            <button type="button" disabled={!canStart} onClick={() => void startGame()} className="mt-6 flex h-16 w-full items-center justify-center gap-3 rounded-2xl bg-[#b7ff45] text-lg font-black text-[#10120f] shadow-[0_7px_0_#648d20] transition active:translate-y-1 active:shadow-[0_2px_0_#648d20] disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/25 disabled:shadow-none">
+              {status === "connecting" || status === "reconnecting" ? <LoaderCircle className="size-5 animate-spin" /> : <Play className="size-5 fill-current" />}
+              {eligiblePlayers.length < GAME_CONFIG.minPlayers ? `Need ${GAME_CONFIG.minPlayers - eligiblePlayers.length} more calibrated` : "Start game"}
+              {canStart && <Expand className="size-4" />}
+            </button>
+          </div>
+        </section>
+      </div>
+      {notice && <Toast message={notice} />}
+    </main>
+  );
+}
+
+function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; now: number; notice: string | null; onEnd: () => void }) {
+  const itPlayer = snapshot.players.find((player) => player.id === snapshot.itPlayerId);
+  const remaining = snapshot.roundEndsAt ? Math.max(0, snapshot.roundEndsAt - now) : 0;
+  const seconds = (remaining / 1_000).toFixed(1).padStart(4, "0");
+  const danger = remaining > 0 && remaining <= 5_000;
+
+  return (
+    <main className="game-screen relative h-dvh cursor-none overflow-hidden bg-[#0d0f0c] text-white">
+      <div className="arena-grid absolute inset-0 opacity-30" />
+      <div className={`timer-wash absolute inset-x-0 top-0 h-[42%] ${danger ? "danger" : ""}`} />
+      <div className="pointer-events-none absolute left-8 top-7 z-20 text-xs font-black uppercase tracking-[.22em] text-white/25">Round {String(snapshot.round).padStart(2, "0")}</div>
+      <div className="pointer-events-none absolute right-8 top-7 z-20 flex items-center gap-2 text-xs font-black uppercase tracking-[.18em] text-white/25">
+        <span className="size-1.5 rounded-full bg-[#b7ff45]" /> {snapshot.players.filter((player) => player.connected).length} live
+      </div>
+
+      <div className="pointer-events-none absolute inset-x-0 top-5 z-10 text-center">
+        <p className={`font-mono text-[clamp(5.6rem,13vw,11rem)] font-black leading-none tracking-[-.09em] tabular-nums ${danger ? "timer-danger text-[#ff5c5c]" : "text-[#f5f5ec]"}`}>{seconds}</p>
+        <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-[#ff5c5c]/30 bg-[#ff5c5c]/12 px-4 py-2 text-sm font-black uppercase tracking-[.12em] text-[#ff8585]">
+          <span className="size-2 animate-pulse rounded-full bg-[#ff5c5c]" />
+          {itPlayer ? `${itPlayer.name} is it` : "Waiting for two players"}
+        </div>
+      </div>
+
+      {snapshot.players.map((player) => <LiveCursor key={player.id} player={player} isIt={player.id === snapshot.itPlayerId} frozen={Boolean(snapshot.freezeUntil && now < snapshot.freezeUntil && snapshot.frozenPlayerIds.includes(player.id))} />)}
+
+      {snapshot.impact && now - snapshot.impact.at < 900 && (
+        <div key={snapshot.impact.id} className="impact-burst pointer-events-none absolute z-30" style={{ left: `${snapshot.impact.x * 100}%`, top: `${snapshot.impact.y * 100}%` }}>
+          <span /><span /><span />
+          <strong>TAG!</strong>
+        </div>
+      )}
+
+      <button type="button" onClick={onEnd} className="host-end-control absolute bottom-5 right-5 z-50 cursor-pointer rounded-full border border-white/10 bg-black/30 px-4 py-2 text-xs font-bold text-white/45 opacity-0 transition hover:opacity-100 focus:opacity-100">End game</button>
+      {notice && <Toast message={notice} />}
+    </main>
+  );
+}
+
+function LiveCursor({ player, isIt, frozen }: { player: RoomPlayer; isIt: boolean; frozen: boolean }) {
+  return (
+    <div className={`live-cursor pointer-events-none absolute left-0 top-0 z-20 ${isIt ? "is-it" : ""} ${player.connected ? "" : "is-disconnected"} ${frozen ? "is-frozen" : ""}`} style={{ transform: `translate3d(calc(${player.position.x * 100}vw - 28px), calc(${player.position.y * 100}vh - 28px), 0)` }}>
+      <div className="cursor-name absolute bottom-[66px] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-black text-[#0f110e] shadow-xl" style={{ backgroundColor: player.color }}>
+        {player.name}{isIt ? " · IT" : ""}{!player.connected ? " · OFFLINE" : ""}
+      </div>
+      <div className="cursor-orb grid size-14 place-items-center rounded-full border-[5px] border-[#f8f8ef] shadow-[0_8px_30px_rgba(0,0,0,.35)]" style={{ backgroundColor: player.color }}>
+        <span className="size-2 rounded-full bg-white" />
+      </div>
+    </div>
+  );
+}
+
+function LobbyPlayer({ player }: { player: RoomPlayer }) {
+  return (
+    <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${player.connected ? "border-white/8 bg-black/15" : "border-white/5 bg-black/10 opacity-45"}`}>
+      <span className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-black text-[#10120f]" style={{ backgroundColor: player.color }}>{player.name.charAt(0).toUpperCase()}</span>
+      <div className="min-w-0 flex-1"><p className="truncate font-black">{player.name}</p><p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-bold text-white/35">{!player.connected ? <><WifiOff className="size-3" /> Disconnected</> : player.calibrated ? <><Check className="size-3 text-[#b7ff45]" /> Calibrated</> : <><LoaderCircle className="size-3 animate-spin" /> Calibrating</>}</p></div>
+    </div>
+  );
+}
+
+function ResultsScreen({ players, onReset }: { players: RoomPlayer[]; onReset: () => void }) {
+  const ranked = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
+  return (
+    <main className="results-shell min-h-dvh bg-[#10120f] px-6 py-10 text-[#f5f5ec]">
+      <div className="landing-grid fixed inset-0 opacity-20" />
+      <div className="relative mx-auto max-w-3xl text-center">
+        <Trophy className="mx-auto size-12 text-[#b7ff45]" />
+        <p className="mt-5 text-xs font-black uppercase tracking-[.22em] text-[#b7ff45]">Game over</p>
+        <h1 className="mt-3 text-6xl font-black tracking-[-.06em] sm:text-8xl">FINAL CHASE</h1>
+        <div className="mt-9 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[.05] text-left">
+          {ranked.map((player, index) => (
+            <div key={player.id} className="flex items-center gap-4 border-b border-white/8 px-5 py-4 last:border-0 sm:px-7">
+              <span className="w-8 font-mono text-xl font-black text-white/25">{String(index + 1).padStart(2, "0")}</span>
+              <span className="size-4 rounded-full" style={{ backgroundColor: player.color }} />
+              <strong className="flex-1 text-xl">{player.name}</strong>
+              <span className="font-mono text-2xl font-black tabular-nums">{player.score > 0 ? "+" : ""}{player.score}</span>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={onReset} className="mt-8 inline-flex h-14 items-center gap-2 rounded-2xl bg-[#b7ff45] px-7 font-black text-[#10120f] shadow-[0_6px_0_#648d20] active:translate-y-1 active:shadow-[0_2px_0_#648d20]"><RotateCcw className="size-4" /> Back to lobby</button>
+      </div>
+    </main>
+  );
+}
+
+function ConnectionPill({ status }: { status: RoomConnectionStatus }) {
+  const connected = status === "connected";
+  return <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[.04] px-3 py-2 text-xs font-bold text-white/50">{status === "connecting" || status === "reconnecting" ? <LoaderCircle className="size-3.5 animate-spin" /> : connected ? <span className="size-2 rounded-full bg-[#b7ff45]" /> : <CircleAlert className="size-3.5 text-[#ff5c5c]" />}{connected ? "Realtime ready" : status === "error" ? "Realtime not configured" : "Connecting"}</span>;
+}
+
+function Toast({ message }: { message: string }) {
+  return <div className="pointer-events-none fixed bottom-7 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-white/12 bg-[#171a16]/95 px-5 py-3 text-sm font-black text-white shadow-2xl backdrop-blur"><X className="size-4 text-[#ff5c5c]" />{message}</div>;
+}

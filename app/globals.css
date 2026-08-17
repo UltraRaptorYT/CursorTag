@@ -1,0 +1,223 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@theme inline {
+  --font-sans: "Arial Black", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+:root {
+  --background: #f2f1e9;
+  --foreground: #171914;
+  --radius: 0.75rem;
+  --border: rgba(17, 19, 15, 0.1);
+  --ring: #7c5cff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+.landing-shell,
+.lobby-shell,
+.results-shell,
+.game-screen {
+  isolation: isolate;
+}
+
+.landing-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    radial-gradient(circle at 68% 22%, rgba(124, 92, 255, 0.16), transparent 34%);
+  background-size: 42px 42px, 42px 42px, 100% 100%;
+  mask-image: linear-gradient(to bottom, black 15%, transparent 100%);
+}
+
+.arena-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-size: 54px 54px;
+}
+
+.demo-cursor {
+  animation: demo-float 3.8s ease-in-out infinite alternate;
+}
+
+.demo-cursor:nth-of-type(3) {
+  animation-delay: -1.3s;
+}
+
+.demo-cursor:nth-of-type(4) {
+  animation-delay: -2.1s;
+}
+
+.it-demo > span:first-child {
+  box-shadow:
+    0 0 0 7px rgba(255, 92, 92, 0.25),
+    0 0 28px rgba(255, 92, 92, 0.8);
+}
+
+.timer-wash {
+  background: radial-gradient(ellipse at 50% -10%, rgba(183, 255, 69, 0.11), transparent 66%);
+}
+
+.timer-wash.danger {
+  background: radial-gradient(ellipse at 50% -10%, rgba(255, 92, 92, 0.2), transparent 68%);
+}
+
+.timer-danger {
+  animation: timer-pulse 0.5s ease-in-out infinite alternate;
+}
+
+.live-cursor {
+  will-change: transform;
+  transition: transform 34ms linear, opacity 180ms ease;
+}
+
+.live-cursor .cursor-orb {
+  transition: transform 120ms ease, filter 180ms ease, opacity 180ms ease;
+}
+
+.live-cursor.is-it .cursor-orb {
+  outline: 8px solid rgba(255, 72, 72, 0.72);
+  box-shadow:
+    0 0 0 15px rgba(255, 72, 72, 0.16),
+    0 0 50px rgba(255, 62, 62, 0.88);
+  animation: it-pulse 0.72s ease-in-out infinite alternate;
+}
+
+.live-cursor.is-it .cursor-name {
+  background: #ff5c5c !important;
+  color: white;
+  box-shadow: 0 0 24px rgba(255, 92, 92, 0.6);
+}
+
+.live-cursor.is-disconnected {
+  opacity: 0.34;
+  filter: grayscale(0.8);
+}
+
+.live-cursor.is-frozen .cursor-orb {
+  transform: scale(1.24);
+  filter: brightness(1.45);
+}
+
+.impact-burst {
+  transform: translate(-50%, -50%);
+}
+
+.impact-burst strong {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-8deg);
+  color: #b7ff45;
+  font-size: clamp(3rem, 8vw, 7rem);
+  font-weight: 1000;
+  letter-spacing: -0.08em;
+  text-shadow: 5px 6px 0 #11130f;
+  animation: impact-word 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.impact-burst span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10rem;
+  height: 10rem;
+  border: 5px solid #ff5c5c;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  animation: impact-ring 0.75s ease-out forwards;
+}
+
+.impact-burst span:nth-child(2) {
+  border-color: #b7ff45;
+  animation-delay: 0.08s;
+}
+
+.impact-burst span:nth-child(3) {
+  border-color: white;
+  animation-delay: 0.16s;
+}
+
+.controller-rings {
+  background: repeating-radial-gradient(circle at center, transparent 0 42px, currentColor 43px 44px);
+}
+
+.calibration-phone {
+  animation: calibration-tilt 2.2s ease-in-out infinite;
+  transform-origin: 50% 80%;
+}
+
+.phone-shell {
+  padding-bottom: env(safe-area-inset-bottom);
+  touch-action: manipulation;
+}
+
+@keyframes demo-float {
+  from { transform: translate3d(-8px, -6px, 0); }
+  to { transform: translate3d(16px, 14px, 0); }
+}
+
+@keyframes timer-pulse {
+  to { transform: scale(1.035); filter: brightness(1.2); }
+}
+
+@keyframes it-pulse {
+  to {
+    outline-width: 12px;
+    box-shadow: 0 0 0 20px rgba(255, 72, 72, 0.1), 0 0 70px rgba(255, 62, 62, 1);
+  }
+}
+
+@keyframes impact-word {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(-14deg) scale(0.25); }
+  35% { opacity: 1; transform: translate(-50%, -50%) rotate(-5deg) scale(1.12); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(-1deg) scale(1.3); }
+}
+
+@keyframes impact-ring {
+  0% { opacity: 0.9; transform: translate(-50%, -50%) scale(0.1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2); }
+}
+
+@keyframes calibration-tilt {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-cursor,
+  .timer-danger,
+  .live-cursor.is-it .cursor-orb,
+  .calibration-phone {
+    animation: none;
+  }
+}
+
