@@ -5,7 +5,7 @@ export const GAME_CONFIG = {
   freezeMs: 300,
   tagImmunityMs: 1_500,
   startingLives: 3,
-  maxRounds: 24,
+  maxRounds: 15,
   minRoundSeconds: 15,
   maxRoundSeconds: 30,
   fastestMinRoundSeconds: 7,

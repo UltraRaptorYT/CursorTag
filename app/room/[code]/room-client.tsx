@@ -78,6 +78,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [now, setNow] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [neutralReset, setNeutralReset] = useState(false);
 
   const socketRef = useRef<RoomSocket | null>(null);
   const joinedRef = useRef(false);
@@ -276,22 +277,51 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     await requestMotionAccess();
   }
 
-  async function calibrate() {
+  function applyNeutralPosition() {
     const reading = currentReadingRef.current;
-    if (!reading) return;
+    if (!reading) return false;
     originRef.current = reading;
     smoothedAimRef.current = { x: 0, y: 0 };
-    lastSentAimRef.current = { x: Number.NaN, y: Number.NaN };
-    lastSentAtRef.current = 0;
     calibratedRef.current = true;
     setCalibrated(true);
     socketRef.current?.send({ type: "calibrated" });
+
+    if (snapshotRef.current.phase === "playing") {
+      const sentAt = performance.now();
+      lastSentAimRef.current = { x: 0, y: 0 };
+      lastSentAtRef.current = sentAt;
+      sequenceRef.current += 1;
+      socketRef.current?.send({
+        type: "cursor",
+        payload: {
+          x: 0.5,
+          y: 0.5,
+          sequence: sequenceRef.current,
+          clientSentAt: sentAt,
+        },
+      });
+    } else {
+      lastSentAimRef.current = { x: Number.NaN, y: Number.NaN };
+      lastSentAtRef.current = 0;
+    }
+    return true;
+  }
+
+  async function calibrate() {
+    if (!applyNeutralPosition()) return;
     try {
       const wakeLock = (navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<unknown> } }).wakeLock;
       await wakeLock?.request("screen");
     } catch {
       // Screen Wake Lock is a convenience, not a gameplay requirement.
     }
+  }
+
+  function recalibrateImmediately() {
+    if (!applyNeutralPosition()) return;
+    setNeutralReset(true);
+    navigator.vibrate?.(35);
+    window.setTimeout(() => setNeutralReset(false), 1_200);
   }
 
   const player = snapshot.players.find((candidate) => candidate.id === playerId);
@@ -412,7 +442,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <p className="relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed text-white/70">{isProtected ? "Your shield prevents an instant re-tag. Move clear!" : isIt ? "Tilt to chase another cursor before time runs out." : "Dodge the glowing red cursor. Don’t get tagged."}</p>
           {isProtected && <span className="relative mt-5 inline-flex items-center gap-2 rounded-full bg-white/18 px-4 py-2 text-xs font-black uppercase tracking-[.12em]"><ShieldCheck className="size-4" /> Tag shield</span>}
         </div>
-        <button type="button" onClick={() => { calibratedRef.current = false; setCalibrated(false); originRef.current = null; }} className="mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[.055] text-sm font-black text-white/55 active:scale-[.98]"><RotateCcw className="size-4" /> Recalibrate neutral</button>
+        <button type="button" onClick={recalibrateImmediately} disabled={!hasReading} className={`mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/55"}`}><RotateCcw className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`} /> {neutralReset ? "Neutral reset" : "Recalibrate instantly"}</button>
       </div>
     </PhoneShell>
   );
