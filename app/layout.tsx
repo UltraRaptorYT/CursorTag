@@ -1,14 +1,23 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : "http://localhost:3000");
+function resolveMetadataBase() {
+  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const candidate = configuredUrl || vercelUrl || "http://localhost:3000";
+  const absoluteUrl = /^https?:\/\//i.test(candidate)
+    ? candidate
+    : `https://${candidate}`;
+
+  try {
+    return new URL(absoluteUrl);
+  } catch {
+    return new URL("http://localhost:3000");
+  }
+}
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: resolveMetadataBase(),
   title: "Cursor Tag — Tilt. Chase. Tag.",
   description: "A browser-based multiplayer party game where every phone becomes a live cursor.",
   openGraph: {
