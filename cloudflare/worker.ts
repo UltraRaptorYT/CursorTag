@@ -17,10 +17,13 @@ type SocketAttachment = {
 
 type StoredRoom = Omit<RoomSnapshot, "hostConnected"> & {
   aspectRatio: number;
+  hostDisconnectExpiresAt: number | null;
+  closed: boolean;
 };
 
 const ROOM_CODE_PATTERN = /^[A-Z0-9]{4,12}$/;
 const MAX_MESSAGE_BYTES = 2_048;
+const HOST_RECONNECT_GRACE_MS = 5_000;
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, {
@@ -38,7 +41,7 @@ function randomIndex(length: number) {
   return bytes[0] % length;
 }
 
-function randomRoundDurationMs(round: number) {
+function randomRoundDurationMs(round: number, previousDurationMs?: number | null) {
   const completedRounds = Math.max(0, round - 1);
   const minimum = Math.max(
     GAME_CONFIG.fastestMinRoundSeconds,
@@ -53,7 +56,17 @@ function randomRoundDurationMs(round: number) {
   const bytes = new Uint32Array(1);
   crypto.getRandomValues(bytes);
   const random = bytes[0] / 2 ** 32;
-  return Math.round((minimum + random * (maximum - minimum)) * 1_000);
+  const randomizedDuration = Math.round(
+    (minimum + random * (maximum - minimum)) * 1_000,
+  );
+  if (!previousDurationMs) return randomizedDuration;
+  return Math.max(
+    GAME_CONFIG.fastestMinRoundSeconds * 1_000,
+    Math.min(
+      randomizedDuration,
+      previousDurationMs - GAME_CONFIG.minimumRoundDecreaseMs,
+    ),
+  );
 }
 
 function clampPosition(position: CursorPosition): CursorPosition {
@@ -81,6 +94,8 @@ function defaultRoom(): StoredRoom {
     maxRounds: GAME_CONFIG.maxRounds,
     collisionRadius: GAME_CONFIG.collisionRadius,
     aspectRatio: 16 / 9,
+    hostDisconnectExpiresAt: null,
+    closed: false,
   };
 }
 
@@ -123,7 +138,24 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     this.ctx.acceptWebSocket(server, [role]);
     server.serializeAttachment({ role, clientId } satisfies SocketAttachment);
 
-    const state = this.loadState();
+    let state = this.loadState();
+    if (role === "host") {
+      if (state.closed) {
+        state = { ...defaultRoom(), maxPlayers: this.maxPlayers() };
+      }
+      state.hostDisconnectExpiresAt = null;
+      this.saveState(state);
+      await this.scheduleNextAlarm(state);
+    } else if (
+      state.closed ||
+      !this.ctx
+        .getWebSockets("host")
+        .some((socket) => socket.readyState === WebSocket.OPEN)
+    ) {
+      this.send(server, { type: "room-closed" });
+      server.close(4004, state.closed ? "Room closed" : "Host not connected");
+      return new Response(null, { status: 101, webSocket: client });
+    }
     this.send(server, {
       type: "connected",
       payload: { clientId, snapshot: this.snapshot(state) },
@@ -171,6 +203,21 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     const attachment = socket.deserializeAttachment() as SocketAttachment | null;
     const state = this.loadState();
 
+    if (attachment?.role === "host") {
+      const hostStillConnected = this.ctx
+        .getWebSockets("host")
+        .some((candidate) => candidate.readyState === WebSocket.OPEN);
+      if (!hostStillConnected && !state.closed) {
+        state.hostDisconnectExpiresAt = Date.now() + HOST_RECONNECT_GRACE_MS;
+        this.saveState(state);
+        await this.scheduleNextAlarm(state);
+      }
+      this.broadcastSnapshot(state);
+      return;
+    }
+
+    if (state.closed) return;
+
     if (attachment?.role === "player" && attachment.player) {
       const storedPlayer = state.players.find(
         (player) => player.id === attachment.player?.id,
@@ -191,6 +238,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       }
 
       this.saveState(state);
+      await this.scheduleNextAlarm(state);
     }
 
     this.broadcastSnapshot(state);
@@ -202,15 +250,32 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
 
   async alarm() {
     const state = this.loadState();
+    const now = Date.now();
+    const hostConnected = this.ctx
+      .getWebSockets("host")
+      .some((socket) => socket.readyState === WebSocket.OPEN);
+
     if (
-      state.phase !== "playing" ||
-      !state.roundEndsAt ||
-      Date.now() + 25 < state.roundEndsAt
+      state.hostDisconnectExpiresAt &&
+      now + 25 >= state.hostDisconnectExpiresAt &&
+      !hostConnected
     ) {
-      if (state.roundEndsAt) await this.ctx.storage.setAlarm(state.roundEndsAt);
+      await this.closeRoom(state);
       return;
     }
-    await this.handleTimeout(state);
+    if (hostConnected && state.hostDisconnectExpiresAt) {
+      state.hostDisconnectExpiresAt = null;
+      this.saveState(state);
+    }
+    if (
+      state.phase === "playing" &&
+      state.roundEndsAt &&
+      now + 25 >= state.roundEndsAt
+    ) {
+      await this.handleTimeout(state);
+      return;
+    }
+    await this.scheduleNextAlarm(state);
   }
 
   private async handleHostMessage(message: ClientRoomMessage) {
@@ -265,7 +330,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         Math.min(3, Number(message.payload.aspectRatio) || 16 / 9),
       );
       this.saveState(state);
-      await this.ctx.storage.setAlarm(state.roundEndsAt);
+      await this.scheduleNextAlarm(state);
       this.broadcastSnapshot(state);
       return;
     }
@@ -279,7 +344,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       state.protectedPlayerId = null;
       state.invulnerableUntil = null;
       this.saveState(state);
-      await this.ctx.storage.deleteAlarm();
+      await this.scheduleNextAlarm(state);
       this.broadcastSnapshot(state);
       return;
     }
@@ -294,7 +359,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       }));
       next.aspectRatio = state.aspectRatio;
       this.saveState(next);
-      await this.ctx.storage.deleteAlarm();
+      await this.scheduleNextAlarm(next);
       this.broadcastSnapshot(next);
     }
   }
@@ -350,7 +415,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         this.assignReplacementIt(state);
       }
       this.saveState(state);
-      if (state.roundEndsAt) await this.ctx.storage.setAlarm(state.roundEndsAt);
+      await this.scheduleNextAlarm(state);
       this.broadcastSnapshot(state);
       return;
     }
@@ -368,7 +433,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         this.assignReplacementIt(state);
       }
       this.saveState(state);
-      if (state.roundEndsAt) await this.ctx.storage.setAlarm(state.roundEndsAt);
+      await this.scheduleNextAlarm(state);
       this.broadcastSnapshot(state);
       return;
     }
@@ -450,13 +515,16 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     if (state.round >= GAME_CONFIG.maxRounds) {
       this.finishGame(state);
       this.saveState(state);
-      await this.ctx.storage.deleteAlarm();
+      await this.scheduleNextAlarm(state);
       this.sendToAll({ type: "tag", payload: this.snapshot(state) });
       return;
     }
 
     state.round += 1;
-    const duration = randomRoundDurationMs(state.round);
+    const duration = randomRoundDurationMs(
+      state.round,
+      state.roundDurationMs,
+    );
     state.itPlayerId = taggedPlayer.id;
     state.roundDurationMs = duration;
     state.roundEndsAt = now + duration;
@@ -473,7 +541,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       toPlayerId: taggedPlayer.id,
     };
     this.saveState(state);
-    await this.ctx.storage.setAlarm(state.roundEndsAt);
+    await this.scheduleNextAlarm(state);
     this.sendToAll({ type: "tag", payload: this.snapshot(state) });
   }
 
@@ -500,7 +568,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     if (survivors.length <= 1 || state.round >= GAME_CONFIG.maxRounds) {
       this.finishGame(state);
       this.saveState(state);
-      await this.ctx.storage.deleteAlarm();
+      await this.scheduleNextAlarm(state);
       this.sendToAll({
         type: "timeout",
         payload: {
@@ -519,21 +587,23 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       state.itPlayerId = null;
       state.roundEndsAt = null;
       state.roundDurationMs = null;
-      await this.ctx.storage.deleteAlarm();
     } else {
       const alternatives = eligible.filter((player) => player.id !== timedOutPlayerId);
       const pool = alternatives.length ? alternatives : eligible;
-      const duration = randomRoundDurationMs(state.round);
+      const duration = randomRoundDurationMs(
+        state.round,
+        state.roundDurationMs,
+      );
       const now = Date.now();
       state.itPlayerId = pool[randomIndex(pool.length)].id;
       state.roundDurationMs = duration;
       state.roundEndsAt = now + duration;
       state.protectedPlayerId = state.itPlayerId;
       state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
-      await this.ctx.storage.setAlarm(state.roundEndsAt);
     }
 
     this.saveState(state);
+    await this.scheduleNextAlarm(state);
     this.sendToAll({
       type: "timeout",
       payload: { timedOutPlayerId: timedOutPlayerId ?? "", snapshot: this.snapshot(state) },
@@ -557,7 +627,10 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     }
     const candidates = active.filter((player) => player.id !== excludedId);
     const pool = candidates.length ? candidates : active;
-    const duration = randomRoundDurationMs(state.round);
+    const duration = randomRoundDurationMs(
+      state.round,
+      state.roundDurationMs,
+    );
     const now = Date.now();
     state.itPlayerId = pool[randomIndex(pool.length)].id;
     state.roundDurationMs = duration;
@@ -577,6 +650,33 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     state.frozenPlayerIds = [];
     state.protectedPlayerId = null;
     state.invulnerableUntil = null;
+  }
+
+  private async closeRoom(state: StoredRoom) {
+    const closedState = {
+      ...defaultRoom(),
+      maxPlayers: this.maxPlayers(),
+      aspectRatio: state.aspectRatio,
+      closed: true,
+    };
+    this.saveState(closedState);
+    await this.ctx.storage.deleteAlarm();
+    this.sendToAll({ type: "room-closed" });
+    for (const socket of this.ctx.getWebSockets("player")) {
+      socket.close(4004, "Host left the room");
+    }
+  }
+
+  private async scheduleNextAlarm(state: StoredRoom) {
+    const deadlines = [
+      state.hostDisconnectExpiresAt,
+      state.phase === "playing" ? state.roundEndsAt : null,
+    ].filter((deadline): deadline is number => typeof deadline === "number");
+    if (!deadlines.length) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    await this.ctx.storage.setAlarm(Math.min(...deadlines));
   }
 
   private collides(a: CursorPosition, b: CursorPosition, aspectRatio: number) {

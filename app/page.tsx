@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { ArrowRight, Gamepad2, MonitorUp, Radio, Zap } from "lucide-react";
+import { ArrowRight, Gamepad2, MonitorUp, Radio, Star, Zap } from "lucide-react";
 
 import { CursorTagLogo } from "@/components/cursor-tag-logo";
 import { sanitizeRoomCode } from "@/lib/game/config";
@@ -68,7 +68,7 @@ export default function HomePage() {
                 <div className="arena-grid absolute inset-0 opacity-45" />
                 <DemoCursor className="left-[18%] top-[24%]" color="#2dd4a8" name="Maya" />
                 <DemoCursor className="left-[66%] top-[63%]" color="#44a7ff" name="Ari" />
-                <DemoCursor className="it-demo left-[43%] top-[45%]" color="#ff5c5c" name="Rowan · IT" />
+                <DemoCursor className="it-demo left-[43%] top-[45%]" color="#ff5c5c" name="Rowan · IT" isIt />
                 <div className="absolute bottom-5 left-5 right-5 flex items-center gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-xs font-bold text-white/45 backdrop-blur">
                   <Gamepad2 className="size-4 text-[#b7ff45]" /> Gyro input · real-time WebSockets · no app install
                 </div>
@@ -85,12 +85,13 @@ export default function HomePage() {
   );
 }
 
-function DemoCursor({ color, name, className }: { color: string; name: string; className: string }) {
+function DemoCursor({ color, name, className, isIt = false }: { color: string; name: string; className: string; isIt?: boolean }) {
   return (
     <div className={`demo-cursor absolute ${className}`}>
-      <span className="block size-9 rounded-full border-[4px] border-white shadow-xl" style={{ backgroundColor: color }} />
+      <span className="grid size-9 place-items-center rounded-full border-[4px] border-white shadow-xl" style={{ backgroundColor: color }} role="img" aria-label={isIt ? `${name} cursor` : undefined}>
+        {isIt && <Star className="size-4 fill-white text-white" strokeWidth={2.5} />}
+      </span>
       <span className="absolute left-1/2 top-[-28px] -translate-x-1/2 whitespace-nowrap rounded-md px-2 py-1 text-[9px] font-black text-[#10120f]" style={{ backgroundColor: color }}>{name}</span>
     </div>
   );
 }
-

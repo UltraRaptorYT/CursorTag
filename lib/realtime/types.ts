@@ -80,4 +80,5 @@ export type ServerRoomMessage =
       type: "pong";
       payload: { id: string; clientSentAt: number; serverSentAt: number };
     }
+  | { type: "room-closed" }
   | { type: "error"; message: string };

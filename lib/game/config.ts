@@ -12,6 +12,7 @@ export const GAME_CONFIG = {
   fastestMaxRoundSeconds: 12,
   minRoundDecayPerRound: 0.75,
   maxRoundDecayPerRound: 1.5,
+  minimumRoundDecreaseMs: 500,
 } as const;
 
 export const PLAYER_COLORS = [

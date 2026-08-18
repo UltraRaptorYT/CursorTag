@@ -11,6 +11,7 @@ import {
   Play,
   RotateCcw,
   Smartphone,
+  Star,
   ShieldCheck,
   Trophy,
   Users,
@@ -323,8 +324,9 @@ function LiveCursor({ player, isIt, frozen, protectedFromTag }: { player: RoomPl
       <div className="cursor-name absolute bottom-[66px] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-black text-[#0f110e] shadow-xl" style={{ backgroundColor: player.color }}>
         {player.name}{player.eliminated ? " · OUT" : isIt ? " · IT" : ""}{!player.connected ? " · OFFLINE" : ""}
       </div>
-      <div className="cursor-orb grid size-14 place-items-center rounded-full border-[5px] border-[#f8f8ef] shadow-[0_8px_30px_rgba(0,0,0,.35)]" style={{ backgroundColor: player.color }}>
-        {protectedFromTag ? <ShieldCheck className="size-6 text-white" /> : <span className="size-2 rounded-full bg-white" />}
+      <div className="cursor-orb relative grid size-14 place-items-center rounded-full border-[5px] border-[#f8f8ef] shadow-[0_8px_30px_rgba(0,0,0,.35)]" style={{ backgroundColor: player.color }} role="img" aria-label={isIt ? `${player.name} is it` : `${player.name}'s cursor`}>
+        {isIt ? <Star className="size-7 fill-white text-white" strokeWidth={2.5} /> : <span className="size-2 rounded-full bg-white" />}
+        {protectedFromTag && <span className="absolute -right-3 -top-3 grid size-6 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-lg"><ShieldCheck className="size-3.5" /></span>}
       </div>
     </div>
   );

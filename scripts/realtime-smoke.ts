@@ -53,12 +53,15 @@ class TestClient {
 }
 
 const host = new TestClient("host", "smoke-host");
-const playerOne = new TestClient("player", "smoke-player-1");
-const playerTwo = new TestClient("player", "smoke-player-2");
+let playerOne: TestClient | undefined;
+let playerTwo: TestClient | undefined;
 let reconnectedPlayer: TestClient | null = null;
 
 try {
-  await Promise.all([host.open(), playerOne.open(), playerTwo.open()]);
+  await host.open();
+  playerOne = new TestClient("player", "smoke-player-1");
+  playerTwo = new TestClient("player", "smoke-player-2");
+  await Promise.all([playerOne.open(), playerTwo.open()]);
   playerOne.send({ type: "join", payload: { name: "Ada" } });
   playerTwo.send({ type: "join", payload: { name: "Lin" } });
   playerOne.send({ type: "calibrated" });
@@ -115,10 +118,50 @@ try {
   ) {
     throw new Error("New chaser did not receive tag immunity");
   }
+  if (
+    !started.payload.roundDurationMs ||
+    !tagged.payload.roundDurationMs ||
+    tagged.payload.roundDurationMs >= started.payload.roundDurationMs
+  ) {
+    throw new Error("The next round did not become faster");
+  }
+  if (
+    !tagged.payload.roundEndsAt ||
+    Math.abs(
+      tagged.payload.roundEndsAt - tagged.payload.roundDurationMs - Date.now(),
+    ) > 1_000
+  ) {
+    throw new Error("The next round timer was not reset from the tag time");
+  }
   const scoringPlayer = tagged.payload.players.find((player) => player.id === itId);
   if (scoringPlayer?.score !== 1) throw new Error("Tag score was not retained");
 
   const taggedClient = target.id === "smoke-player-1" ? playerOne : playerTwo;
+  const freezeWait = Math.max(
+    0,
+    (tagged.payload.freezeUntil ?? Date.now()) - Date.now() + 75,
+  );
+  await new Promise((resolve) => setTimeout(resolve, freezeWait));
+  const tagCountBeforeImmunityCheck = host.messages.filter(
+    (message) => message.type === "tag",
+  ).length;
+  const formerIt = tagged.payload.players.find((player) => player.id === itId);
+  if (!formerIt) throw new Error("Former it player was missing");
+  taggedClient.send({
+    type: "cursor",
+    payload: {
+      ...formerIt.position,
+      sequence: 2,
+      clientSentAt: performance.now(),
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (
+    host.messages.filter((message) => message.type === "tag").length !==
+    tagCountBeforeImmunityCheck
+  ) {
+    throw new Error("Tag immunity allowed an immediate re-tag");
+  }
   taggedClient.socket.close();
   const disconnected = await host.waitFor(
     (message) =>
@@ -152,6 +195,28 @@ try {
     throw new Error("Reconnecting the released it player did not resume the game");
   }
 
+  host.socket.close();
+  const roomClosed = await reconnectedPlayer.waitFor(
+    (message) => message.type === "room-closed",
+    8_000,
+    "room closure after the host disconnects",
+  );
+  if (roomClosed.type !== "room-closed") {
+    throw new Error("Players were not removed when the host left");
+  }
+
+  const latePlayer = new TestClient("player", "smoke-player-late");
+  await latePlayer.open();
+  const rejected = await latePlayer.waitFor(
+    (message) => message.type === "room-closed",
+    5_000,
+    "hostless room rejection",
+  );
+  latePlayer.socket.close();
+  if (rejected.type !== "room-closed") {
+    throw new Error("A player connected to a room without a host");
+  }
+
   console.log(
     JSON.stringify({
       ok: true,
@@ -161,11 +226,13 @@ try {
       tagTransferredTo: target.name,
       disconnectedCursorRetained: true,
       reconnectResumedGame: true,
+      hostDepartureClosedRoom: true,
+      hostlessJoinRejected: true,
     }),
   );
 } finally {
   host.socket.close();
-  playerOne.socket.close();
-  playerTwo.socket.close();
+  playerOne?.socket.close();
+  playerTwo?.socket.close();
   reconnectedPlayer?.socket.close();
 }
