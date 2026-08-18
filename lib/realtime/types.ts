@@ -13,6 +13,8 @@ export type RoomPlayer = {
   calibrated: boolean;
   position: CursorPosition;
   score: number;
+  lives: number;
+  eliminated: boolean;
 };
 
 export type Impact = {
@@ -34,8 +36,12 @@ export type RoomSnapshot = {
   roundDurationMs: number | null;
   freezeUntil: number | null;
   frozenPlayerIds: string[];
+  protectedPlayerId: string | null;
+  invulnerableUntil: number | null;
   impact: Impact | null;
   maxPlayers: number;
+  maxLives: number;
+  maxRounds: number;
   collisionRadius: number;
 };
 

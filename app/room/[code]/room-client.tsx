@@ -5,9 +5,12 @@ import {
   ArrowRight,
   CircleAlert,
   Crosshair,
+  Eye,
+  Heart,
   LoaderCircle,
   Move3d,
   RotateCcw,
+  ShieldCheck,
   Smartphone,
   Trophy,
   UserRound,
@@ -17,20 +20,18 @@ import {
 
 import { CursorTagLogo } from "@/components/cursor-tag-logo";
 import { GAME_CONFIG } from "@/lib/game/config";
+import {
+  AIR_MOUSE_CONFIG,
+  calculateAirMouseAim,
+  type AirMouseOrientation,
+} from "@/lib/input/airmouse";
 import { createRoomSocket, type RoomConnectionStatus, type RoomSocket } from "@/lib/realtime/room";
 import type { RoomSnapshot, ServerRoomMessage } from "@/lib/realtime/types";
 
 type SensorStatus = "idle" | "requesting" | "active" | "denied" | "unsupported";
-type OrientationReading = { beta: number; gamma: number; angle: number };
 type PermissionCapableOrientation = typeof DeviceOrientationEvent & {
   requestPermission?: () => Promise<"granted" | "denied">;
 };
-
-const DEAD_ZONE_DEGREES = 1.5;
-const HORIZONTAL_RANGE_DEGREES = 24;
-const VERTICAL_RANGE_DEGREES = 20;
-const SEND_INTERVAL_MS = 33;
-const AIM_CHANGE_THRESHOLD = 0.0025;
 
 function emptySnapshot(): RoomSnapshot {
   return {
@@ -43,8 +44,12 @@ function emptySnapshot(): RoomSnapshot {
     roundDurationMs: null,
     freezeUntil: null,
     frozenPlayerIds: [],
+    protectedPlayerId: null,
+    invulnerableUntil: null,
     impact: null,
     maxPlayers: GAME_CONFIG.maxPlayers,
+    maxLives: GAME_CONFIG.startingLives,
+    maxRounds: GAME_CONFIG.maxRounds,
     collisionRadius: GAME_CONFIG.collisionRadius,
   };
 }
@@ -58,32 +63,6 @@ function getPlayerId(roomCode: string) {
   return id;
 }
 
-function getScreenAngle() {
-  const angle = window.screen.orientation?.angle;
-  if (typeof angle === "number") return angle;
-  return Number((window as Window & { orientation?: number }).orientation ?? 0);
-}
-
-function applyDeadZone(value: number) {
-  const magnitude = Math.abs(value);
-  if (magnitude <= DEAD_ZONE_DEGREES) return 0;
-  return Math.sign(value) * (magnitude - DEAD_ZONE_DEGREES);
-}
-
-function clampAim(value: number) {
-  return Math.max(-1, Math.min(1, value));
-}
-
-function relativeTilt(current: OrientationReading, origin: OrientationReading) {
-  const beta = current.beta - origin.beta;
-  const gamma = current.gamma - origin.gamma;
-  const angle = ((current.angle % 360) + 360) % 360;
-  if (angle === 90) return { horizontal: beta, vertical: -gamma };
-  if (angle === 270) return { horizontal: -beta, vertical: gamma };
-  if (angle === 180) return { horizontal: -gamma, vertical: -beta };
-  return { horizontal: gamma, vertical: beta };
-}
-
 export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [status, setStatus] = useState<RoomConnectionStatus>("connecting");
   const [snapshot, setSnapshot] = useState<RoomSnapshot>(emptySnapshot);
@@ -94,13 +73,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>("idle");
   const [hasReading, setHasReading] = useState(false);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [now, setNow] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const socketRef = useRef<RoomSocket | null>(null);
   const joinedRef = useRef(false);
   const nicknameRef = useRef("");
-  const currentReadingRef = useRef<OrientationReading | null>(null);
-  const originRef = useRef<OrientationReading | null>(null);
+  const currentReadingRef = useRef<AirMouseOrientation | null>(null);
+  const originRef = useRef<AirMouseOrientation | null>(null);
   const smoothedAimRef = useRef({ x: 0, y: 0 });
   const lastSentAimRef = useRef({ x: Number.NaN, y: Number.NaN });
   const lastSentAtRef = useRef(0);
@@ -126,9 +106,18 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     }, 0);
 
     function handleMessage(message: ServerRoomMessage) {
-      if (message.type === "connected") setSnapshot(message.payload.snapshot);
-      if (message.type === "snapshot" || message.type === "tag") setSnapshot(message.payload);
-      if (message.type === "timeout") setSnapshot(message.payload.snapshot);
+      if (message.type === "connected") {
+        setSnapshot(message.payload.snapshot);
+        if (message.payload.snapshot.phase === "playing") setNow(Date.now());
+      }
+      if (message.type === "snapshot" || message.type === "tag") {
+        setSnapshot(message.payload);
+        if (message.payload.phase === "playing") setNow(Date.now());
+      }
+      if (message.type === "timeout") {
+        setSnapshot(message.payload.snapshot);
+        setNow(Date.now());
+      }
       if (message.type === "pong") {
         setLatencyMs(Math.max(0, Math.round(performance.now() - message.payload.clientSentAt)));
       }
@@ -158,11 +147,17 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   }, [roomCode]);
 
   useEffect(() => {
+    if (!snapshot.invulnerableUntil || snapshot.phase !== "playing") return;
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(timer);
+  }, [snapshot.invulnerableUntil, snapshot.phase]);
+
+  useEffect(() => {
     if (sensorStatus !== "active") return;
 
     function handleOrientation(event: DeviceOrientationEvent) {
-      if (typeof event.beta !== "number" || typeof event.gamma !== "number") return;
-      const current = { beta: event.beta, gamma: event.gamma, angle: getScreenAngle() };
+      if (typeof event.alpha !== "number" || typeof event.beta !== "number") return;
+      const current = { alpha: event.alpha, beta: event.beta };
       currentReadingRef.current = current;
       if (!hasReadingRef.current) {
         hasReadingRef.current = true;
@@ -171,24 +166,27 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
       const origin = originRef.current;
       if (!origin || !calibratedRef.current || snapshotRef.current.phase !== "playing") return;
-      const tilt = relativeTilt(current, origin);
-      const rawAim = {
-        x: clampAim(applyDeadZone(tilt.horizontal) / (HORIZONTAL_RANGE_DEGREES - DEAD_ZONE_DEGREES)),
-        y: clampAim(-applyDeadZone(tilt.vertical) / (VERTICAL_RANGE_DEGREES - DEAD_ZONE_DEGREES)),
-      };
-      const previous = smoothedAimRef.current;
-      const distance = Math.hypot(rawAim.x - previous.x, rawAim.y - previous.y);
-      const smoothing = distance > 0.25 ? 0.62 : 0.46;
-      const next = {
-        x: previous.x + (rawAim.x - previous.x) * smoothing,
-        y: previous.y + (rawAim.y - previous.y) * smoothing,
-      };
+      const next = calculateAirMouseAim(
+        current,
+        origin,
+        smoothedAimRef.current,
+      );
       smoothedAimRef.current = next;
 
       const sentAt = performance.now();
-      if (sentAt - lastSentAtRef.current < SEND_INTERVAL_MS) return;
+      if (
+        sentAt - lastSentAtRef.current <
+        AIR_MOUSE_CONFIG.sendIntervalMs
+      ) {
+        return;
+      }
       const last = lastSentAimRef.current;
-      if (Math.abs(next.x - last.x) < AIM_CHANGE_THRESHOLD && Math.abs(next.y - last.y) < AIM_CHANGE_THRESHOLD) return;
+      if (
+        Math.abs(next.x - last.x) < AIR_MOUSE_CONFIG.aimChangeThreshold &&
+        Math.abs(next.y - last.y) < AIR_MOUSE_CONFIG.aimChangeThreshold
+      ) {
+        return;
+      }
 
       lastSentAtRef.current = sentAt;
       lastSentAimRef.current = next;
@@ -270,6 +268,12 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   const player = snapshot.players.find((candidate) => candidate.id === playerId);
   const isIt = snapshot.itPlayerId === playerId;
+  const isProtected = Boolean(
+    isIt &&
+      snapshot.protectedPlayerId === playerId &&
+      snapshot.invulnerableUntil &&
+      now < snapshot.invulnerableUntil,
+  );
 
   if (!joined) {
     return (
@@ -328,8 +332,22 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <Trophy className="size-16 text-[#6f50ea]" />
           <span className="phone-eyebrow mt-6">Game over</span>
-          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">{player?.score ?? 0} PTS</h1>
+          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">{player?.lives ?? 0} LIVES</h1>
+          <p className="mt-2 font-mono text-sm font-black text-[#6f50ea]">{player?.score ?? 0} points</p>
           <p className="mt-3 text-[#6c6d67]">Check the big screen for the final ranking.</p>
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  if (snapshot.phase === "playing" && player?.eliminated) {
+    return (
+      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={player.color}>
+        <div className="flex flex-1 flex-col items-center justify-center text-center">
+          <div className="grid size-24 place-items-center rounded-[2rem] bg-[#171914] text-white"><Eye className="size-10" /></div>
+          <span className="phone-eyebrow mt-7">No lives left</span>
+          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">YOU’RE OUT.</h1>
+          <p className="mt-4 max-w-xs text-[#6c6d67]">Your cursor is no longer taggable. Keep watching the chase on the big screen.</p>
         </div>
       </PhoneShell>
     );
@@ -355,9 +373,13 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         <div className={`relative flex flex-1 flex-col items-center justify-center overflow-hidden rounded-[2.25rem] border text-center shadow-xl ${isIt ? "border-[#ff5c5c]/30 bg-[#ff5c5c] text-white" : "border-black/5 bg-white text-[#171914]"}`}>
           <div className="controller-rings absolute inset-0 opacity-25" />
           <div className="relative grid size-28 place-items-center rounded-full border-[8px] border-white shadow-[0_16px_45px_rgba(0,0,0,.2)]" style={{ backgroundColor: player?.color ?? "#b7ff45" }}><span className="size-3 rounded-full bg-white" /></div>
-          <p className={`relative mt-8 text-xs font-black uppercase tracking-[.22em] ${isIt ? "text-white/65" : "text-black/35"}`}>Round {snapshot.round}</p>
-          <h1 className="relative mt-2 text-5xl font-black leading-[.9] tracking-[-.06em]">{isIt ? "YOU’RE IT!" : "KEEP MOVING"}</h1>
-          <p className={`relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed ${isIt ? "text-white/75" : "text-black/48"}`}>{isIt ? "Tilt to chase another cursor before time runs out." : "Dodge the glowing red cursor. Don’t get tagged."}</p>
+          <div className="relative mt-8 flex gap-1" aria-label={`${player?.lives ?? 0} lives`}>
+            {Array.from({ length: snapshot.maxLives }, (_, index) => <Heart key={index} className={`size-5 ${index < (player?.lives ?? 0) ? "fill-current" : "opacity-20"}`} />)}
+          </div>
+          <p className={`relative mt-3 text-xs font-black uppercase tracking-[.22em] ${isIt ? "text-white/65" : "text-black/35"}`}>Round {snapshot.round} / {snapshot.maxRounds}</p>
+          <h1 className="relative mt-2 text-5xl font-black leading-[.9] tracking-[-.06em]">{isProtected ? "GET READY" : isIt ? "YOU’RE IT!" : "KEEP MOVING"}</h1>
+          <p className={`relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed ${isIt ? "text-white/75" : "text-black/48"}`}>{isProtected ? "Your shield prevents an instant re-tag. Move clear!" : isIt ? "Tilt to chase another cursor before time runs out." : "Dodge the glowing red cursor. Don’t get tagged."}</p>
+          {isProtected && <span className="relative mt-5 inline-flex items-center gap-2 rounded-full bg-white/18 px-4 py-2 text-xs font-black uppercase tracking-[.12em]"><ShieldCheck className="size-4" /> Tag shield</span>}
         </div>
         <button type="button" onClick={() => { calibratedRef.current = false; setCalibrated(false); originRef.current = null; }} className="mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-white/60 text-sm font-black text-black/55 active:scale-[.98]"><RotateCcw className="size-4" /> Recalibrate neutral</button>
       </div>

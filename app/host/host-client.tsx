@@ -6,10 +6,12 @@ import {
   Check,
   CircleAlert,
   Expand,
+  Heart,
   LoaderCircle,
   Play,
   RotateCcw,
   Smartphone,
+  ShieldCheck,
   Trophy,
   Users,
   WifiOff,
@@ -32,8 +34,12 @@ function emptySnapshot(): RoomSnapshot {
     roundDurationMs: null,
     freezeUntil: null,
     frozenPlayerIds: [],
+    protectedPlayerId: null,
+    invulnerableUntil: null,
     impact: null,
     maxPlayers: GAME_CONFIG.maxPlayers,
+    maxLives: GAME_CONFIG.startingLives,
+    maxRounds: GAME_CONFIG.maxRounds,
     collisionRadius: GAME_CONFIG.collisionRadius,
   };
 }
@@ -257,25 +263,46 @@ function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; 
   const remaining = snapshot.roundEndsAt ? Math.max(0, snapshot.roundEndsAt - now) : 0;
   const seconds = (remaining / 1_000).toFixed(1).padStart(4, "0");
   const danger = remaining > 0 && remaining <= 5_000;
+  const paused = !itPlayer || !snapshot.roundEndsAt;
+  const readyPlayers = snapshot.players.filter(
+    (player) => player.connected && player.calibrated && !player.eliminated,
+  ).length;
 
   return (
     <main className="game-screen relative h-dvh cursor-none overflow-hidden bg-[#0d0f0c] text-white">
       <div className="arena-grid absolute inset-0 opacity-30" />
       <div className={`timer-wash absolute inset-x-0 top-0 h-[42%] ${danger ? "danger" : ""}`} />
-      <div className="pointer-events-none absolute left-8 top-7 z-20 text-xs font-black uppercase tracking-[.22em] text-white/25">Round {String(snapshot.round).padStart(2, "0")}</div>
+      <div className="pointer-events-none absolute left-8 top-7 z-20 text-xs font-black uppercase tracking-[.22em] text-white/25">Round {String(snapshot.round).padStart(2, "0")} / {snapshot.maxRounds}</div>
       <div className="pointer-events-none absolute right-8 top-7 z-20 flex items-center gap-2 text-xs font-black uppercase tracking-[.18em] text-white/25">
-        <span className="size-1.5 rounded-full bg-[#b7ff45]" /> {snapshot.players.filter((player) => player.connected).length} live
+        <span className="size-1.5 rounded-full bg-[#b7ff45]" /> {readyPlayers} ready
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 top-5 z-10 text-center">
-        <p className={`font-mono text-[clamp(5.6rem,13vw,11rem)] font-black leading-none tracking-[-.09em] tabular-nums ${danger ? "timer-danger text-[#ff5c5c]" : "text-[#f5f5ec]"}`}>{seconds}</p>
+        <p className={`font-mono font-black leading-none tracking-[-.09em] tabular-nums ${
+          paused
+            ? "text-[clamp(4rem,10vw,8rem)] text-white/28"
+            : `text-[clamp(5.6rem,13vw,11rem)] ${danger ? "timer-danger text-[#ff5c5c]" : "text-[#f5f5ec]"}`
+        }`}>{paused ? "PAUSED" : seconds}</p>
         <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-[#ff5c5c]/30 bg-[#ff5c5c]/12 px-4 py-2 text-sm font-black uppercase tracking-[.12em] text-[#ff8585]">
           <span className="size-2 animate-pulse rounded-full bg-[#ff5c5c]" />
-          {itPlayer ? `${itPlayer.name} is it` : "Waiting for two players"}
+          {itPlayer ? `${itPlayer.name} is it` : "Waiting for two ready players"}
         </div>
       </div>
 
-      {snapshot.players.map((player) => <LiveCursor key={player.id} player={player} isIt={player.id === snapshot.itPlayerId} frozen={Boolean(snapshot.freezeUntil && now < snapshot.freezeUntil && snapshot.frozenPlayerIds.includes(player.id))} />)}
+      {snapshot.players.map((player) => <LiveCursor key={player.id} player={player} isIt={player.id === snapshot.itPlayerId} frozen={Boolean(snapshot.freezeUntil && now < snapshot.freezeUntil && snapshot.frozenPlayerIds.includes(player.id))} protectedFromTag={Boolean(snapshot.protectedPlayerId === player.id && snapshot.invulnerableUntil && now < snapshot.invulnerableUntil)} />)}
+
+      <div className="pointer-events-none absolute bottom-6 left-6 z-10 flex max-w-[75vw] flex-wrap gap-2">
+        {snapshot.players.map((player) => (
+          <div key={player.id} className={`flex items-center gap-2 rounded-xl border border-white/8 bg-black/35 px-3 py-2 text-xs backdrop-blur ${player.eliminated ? "opacity-30" : ""}`}>
+            <span className="size-2.5 rounded-full" style={{ backgroundColor: player.color }} />
+            <strong>{player.name}</strong>
+            <span className="flex gap-0.5" aria-label={`${player.lives} lives`}>
+              {Array.from({ length: snapshot.maxLives }, (_, index) => <Heart key={index} className={`size-3 ${index < player.lives ? "fill-[#ff5c5c] text-[#ff5c5c]" : "text-white/15"}`} />)}
+            </span>
+            <span className="font-mono text-white/40">{player.score > 0 ? "+" : ""}{player.score}</span>
+          </div>
+        ))}
+      </div>
 
       {snapshot.impact && now - snapshot.impact.at < 900 && (
         <div key={snapshot.impact.id} className="impact-burst pointer-events-none absolute z-30" style={{ left: `${snapshot.impact.x * 100}%`, top: `${snapshot.impact.y * 100}%` }}>
@@ -290,14 +317,14 @@ function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; 
   );
 }
 
-function LiveCursor({ player, isIt, frozen }: { player: RoomPlayer; isIt: boolean; frozen: boolean }) {
+function LiveCursor({ player, isIt, frozen, protectedFromTag }: { player: RoomPlayer; isIt: boolean; frozen: boolean; protectedFromTag: boolean }) {
   return (
-    <div className={`live-cursor pointer-events-none absolute left-0 top-0 z-20 ${isIt ? "is-it" : ""} ${player.connected ? "" : "is-disconnected"} ${frozen ? "is-frozen" : ""}`} style={{ transform: `translate3d(calc(${player.position.x * 100}vw - 28px), calc(${player.position.y * 100}vh - 28px), 0)` }}>
+    <div className={`live-cursor pointer-events-none absolute left-0 top-0 z-20 ${isIt ? "is-it" : ""} ${player.connected ? "" : "is-disconnected"} ${frozen ? "is-frozen" : ""} ${protectedFromTag ? "is-protected" : ""} ${player.eliminated ? "is-eliminated" : ""}`} style={{ transform: `translate3d(calc(${player.position.x * 100}vw - 28px), calc(${player.position.y * 100}vh - 28px), 0)` }}>
       <div className="cursor-name absolute bottom-[66px] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-black text-[#0f110e] shadow-xl" style={{ backgroundColor: player.color }}>
-        {player.name}{isIt ? " · IT" : ""}{!player.connected ? " · OFFLINE" : ""}
+        {player.name}{player.eliminated ? " · OUT" : isIt ? " · IT" : ""}{!player.connected ? " · OFFLINE" : ""}
       </div>
       <div className="cursor-orb grid size-14 place-items-center rounded-full border-[5px] border-[#f8f8ef] shadow-[0_8px_30px_rgba(0,0,0,.35)]" style={{ backgroundColor: player.color }}>
-        <span className="size-2 rounded-full bg-white" />
+        {protectedFromTag ? <ShieldCheck className="size-6 text-white" /> : <span className="size-2 rounded-full bg-white" />}
       </div>
     </div>
   );
@@ -307,13 +334,13 @@ function LobbyPlayer({ player }: { player: RoomPlayer }) {
   return (
     <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${player.connected ? "border-white/8 bg-black/15" : "border-white/5 bg-black/10 opacity-45"}`}>
       <span className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-black text-[#10120f]" style={{ backgroundColor: player.color }}>{player.name.charAt(0).toUpperCase()}</span>
-      <div className="min-w-0 flex-1"><p className="truncate font-black">{player.name}</p><p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-bold text-white/35">{!player.connected ? <><WifiOff className="size-3" /> Disconnected</> : player.calibrated ? <><Check className="size-3 text-[#b7ff45]" /> Calibrated</> : <><LoaderCircle className="size-3 animate-spin" /> Calibrating</>}</p></div>
+      <div className="min-w-0 flex-1"><p className="truncate font-black">{player.name}</p><p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-bold text-white/35">{!player.connected ? <><WifiOff className="size-3" /> Disconnected</> : player.calibrated ? <><Check className="size-3 text-[#b7ff45]" /> Ready · {player.lives} lives</> : <><LoaderCircle className="size-3 animate-spin" /> Calibrating</>}</p></div>
     </div>
   );
 }
 
 function ResultsScreen({ players, onReset }: { players: RoomPlayer[]; onReset: () => void }) {
-  const ranked = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
+  const ranked = useMemo(() => [...players].sort((a, b) => b.lives - a.lives || b.score - a.score), [players]);
   return (
     <main className="results-shell min-h-dvh bg-[#10120f] px-6 py-10 text-[#f5f5ec]">
       <div className="landing-grid fixed inset-0 opacity-20" />
@@ -327,7 +354,8 @@ function ResultsScreen({ players, onReset }: { players: RoomPlayer[]; onReset: (
               <span className="w-8 font-mono text-xl font-black text-white/25">{String(index + 1).padStart(2, "0")}</span>
               <span className="size-4 rounded-full" style={{ backgroundColor: player.color }} />
               <strong className="flex-1 text-xl">{player.name}</strong>
-              <span className="font-mono text-2xl font-black tabular-nums">{player.score > 0 ? "+" : ""}{player.score}</span>
+              <span className="flex items-center gap-1 font-mono text-sm font-black text-[#ff8585]"><Heart className="size-4 fill-current" />{player.lives}</span>
+              <span className="w-14 text-right font-mono text-2xl font-black tabular-nums">{player.score > 0 ? "+" : ""}{player.score}</span>
             </div>
           ))}
         </div>

@@ -3,8 +3,15 @@ export const GAME_CONFIG = {
   minPlayers: 2,
   collisionRadius: 0.058,
   freezeMs: 300,
+  tagImmunityMs: 1_500,
+  startingLives: 3,
+  maxRounds: 24,
   minRoundSeconds: 15,
   maxRoundSeconds: 30,
+  fastestMinRoundSeconds: 7,
+  fastestMaxRoundSeconds: 12,
+  minRoundDecayPerRound: 0.75,
+  maxRoundDecayPerRound: 1.5,
 } as const;
 
 export const PLAYER_COLORS = [
@@ -28,4 +35,3 @@ export function generateRoomCode(length = 6) {
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
-

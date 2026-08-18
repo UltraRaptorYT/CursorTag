@@ -96,7 +96,7 @@ button:not(:disabled) {
 
 .live-cursor {
   will-change: transform;
-  transition: transform 34ms linear, opacity 180ms ease;
+  transition: transform 80ms linear, opacity 180ms ease;
 }
 
 .live-cursor .cursor-orb {
@@ -125,6 +125,23 @@ button:not(:disabled) {
 .live-cursor.is-frozen .cursor-orb {
   transform: scale(1.24);
   filter: brightness(1.45);
+}
+
+.live-cursor.is-protected .cursor-orb {
+  outline: 5px solid rgba(183, 255, 69, 0.9);
+  box-shadow:
+    0 0 0 12px rgba(183, 255, 69, 0.14),
+    0 0 42px rgba(183, 255, 69, 0.75);
+  animation: shield-pulse 0.45s ease-in-out infinite alternate;
+}
+
+.live-cursor.is-eliminated {
+  opacity: 0.16;
+  filter: grayscale(1);
+}
+
+.live-cursor.is-eliminated .cursor-orb {
+  transform: scale(0.72);
 }
 
 .impact-burst {
@@ -212,12 +229,19 @@ button:not(:disabled) {
   50% { transform: rotate(8deg); }
 }
 
+@keyframes shield-pulse {
+  to {
+    outline-width: 9px;
+    box-shadow: 0 0 0 18px rgba(183, 255, 69, 0.08), 0 0 58px rgba(183, 255, 69, 0.9);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .demo-cursor,
   .timer-danger,
   .live-cursor.is-it .cursor-orb,
+  .live-cursor.is-protected .cursor-orb,
   .calibration-phone {
     animation: none;
   }
 }
-

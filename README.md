@@ -5,8 +5,10 @@ Cursor Tag is a disposable, browser-based multiplayer party game. Players join f
 ## Game rules
 
 - One connected player is randomly selected as **it**.
-- The chaser scores `+1` by colliding with another cursor. Both cursors freeze for 300 ms, the tagged player becomes it, and a new 15–30 second timer starts.
-- If time expires, the chaser loses `1` point, a different connected player becomes it, and play continues.
+- Every player starts with 3 lives. The chaser scores `+1` by colliding with another cursor. Both cursors freeze for 300 ms, the tagged player becomes it, and receives a 1.5-second shield against an instant re-tag.
+- If time expires, the chaser loses `1` point and one life. At zero lives their cursor is eliminated from collisions.
+- The randomized timer gets faster every round: it begins at 15–30 seconds and tightens to a 7–12 second endgame.
+- The last surviving cursor wins. A 24-round cap guarantees a result if nobody runs out of lives.
 - Disconnected cursors remain frozen on screen. A disconnected chaser is released immediately so the game cannot get stuck.
 - Rooms support 2–8 players by default. Change `MAX_PLAYERS` in `cloudflare/wrangler.jsonc` to use a different cap (2–16).
 
@@ -56,7 +58,7 @@ bun run realtime:smoke
 
 ## Latency tuning
 
-The controller samples `deviceorientation`, removes a 1.5° dead zone, applies adaptive smoothing, and sends at most once every 33 ms (about 30 Hz). The host uses a 34 ms linear interpolation so motion is smooth without adding a long easing tail.
+The controller preserves the original airmouse mapping: calibrated `alpha` rotation controls horizontal aim, `beta` controls vertical aim, the ranges are 32° × 24°, smoothing is `0.35`, and updates are sent every 50 ms. Cursor Tag adds only the requested 1.5° neutral dead zone. The host retains the original 80 ms linear interpolation.
 
 The controller header shows WebSocket round-trip time:
 
@@ -64,7 +66,7 @@ The controller header shows WebSocket round-trip time:
 - amber: 81–140 ms
 - red: above 140 ms
 
-The key tuning constants are near the top of `app/room/[code]/room-client.tsx`. Test on the same Wi-Fi and on cellular before changing smoothing or send frequency; RTT is only the network portion of tilt-to-photon latency.
+The shared input implementation and tuning constants live in `lib/input/airmouse.ts`. Test on the same Wi-Fi and on cellular before changing them; RTT is only the network portion of tilt-to-photon latency.
 
 ## Deploy
 
@@ -100,4 +102,3 @@ NEXT_PUBLIC_CURSOR_TAG_WS_URL=wss://cursor-tag-realtime.YOUR-SUBDOMAIN.workers.d
 ```
 
 Redeploy after changing it because `NEXT_PUBLIC_` values are embedded in the browser bundle at build time.
-

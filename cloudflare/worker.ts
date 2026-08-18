@@ -38,9 +38,22 @@ function randomIndex(length: number) {
   return bytes[0] % length;
 }
 
-function randomRoundDurationMs() {
-  const span = GAME_CONFIG.maxRoundSeconds - GAME_CONFIG.minRoundSeconds + 1;
-  return (GAME_CONFIG.minRoundSeconds + randomIndex(span)) * 1_000;
+function randomRoundDurationMs(round: number) {
+  const completedRounds = Math.max(0, round - 1);
+  const minimum = Math.max(
+    GAME_CONFIG.fastestMinRoundSeconds,
+    GAME_CONFIG.minRoundSeconds -
+      completedRounds * GAME_CONFIG.minRoundDecayPerRound,
+  );
+  const maximum = Math.max(
+    GAME_CONFIG.fastestMaxRoundSeconds,
+    GAME_CONFIG.maxRoundSeconds -
+      completedRounds * GAME_CONFIG.maxRoundDecayPerRound,
+  );
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  const random = bytes[0] / 2 ** 32;
+  return Math.round((minimum + random * (maximum - minimum)) * 1_000);
 }
 
 function clampPosition(position: CursorPosition): CursorPosition {
@@ -60,8 +73,12 @@ function defaultRoom(): StoredRoom {
     roundDurationMs: null,
     freezeUntil: null,
     frozenPlayerIds: [],
+    protectedPlayerId: null,
+    invulnerableUntil: null,
     impact: null,
     maxPlayers: GAME_CONFIG.maxPlayers,
+    maxLives: GAME_CONFIG.startingLives,
+    maxRounds: GAME_CONFIG.maxRounds,
     collisionRadius: GAME_CONFIG.collisionRadius,
     aspectRatio: 16 / 9,
   };
@@ -161,6 +178,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       const disconnected = {
         ...attachment.player,
         score: storedPlayer?.score ?? attachment.player.score,
+        lives: storedPlayer?.lives ?? attachment.player.lives,
+        eliminated: storedPlayer?.eliminated ?? attachment.player.eliminated,
         connected: false,
       };
       state.players = this.mergePlayers(state).map((player) =>
@@ -213,7 +232,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
 
     if (message.type === "host-start") {
       const eligible = this.mergePlayers(state).filter(
-        (player) => player.connected && player.calibrated,
+        (player) => player.connected && player.calibrated && !player.eliminated,
       );
       if (eligible.length < GAME_CONFIG.minPlayers) {
         this.sendToHosts({
@@ -223,15 +242,23 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         return;
       }
 
-      const duration = randomRoundDurationMs();
+      const duration = randomRoundDurationMs(1);
+      const now = Date.now();
       state.phase = "playing";
-      state.players = this.mergePlayers(state).map((player) => ({ ...player, score: 0 }));
+      state.players = this.mergePlayers(state).map((player) => ({
+        ...player,
+        score: 0,
+        lives: GAME_CONFIG.startingLives,
+        eliminated: false,
+      }));
       state.itPlayerId = eligible[randomIndex(eligible.length)].id;
       state.round = 1;
       state.roundDurationMs = duration;
-      state.roundEndsAt = Date.now() + duration;
+      state.roundEndsAt = now + duration;
       state.freezeUntil = null;
       state.frozenPlayerIds = [];
+      state.protectedPlayerId = state.itPlayerId;
+      state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
       state.impact = null;
       state.aspectRatio = Math.max(
         0.5,
@@ -249,6 +276,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       state.roundDurationMs = null;
       state.freezeUntil = null;
       state.frozenPlayerIds = [];
+      state.protectedPlayerId = null;
+      state.invulnerableUntil = null;
       this.saveState(state);
       await this.ctx.storage.deleteAlarm();
       this.broadcastSnapshot(state);
@@ -260,6 +289,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       next.players = this.mergePlayers(state).map((player) => ({
         ...player,
         score: 0,
+        lives: GAME_CONFIG.startingLives,
+        eliminated: false,
       }));
       next.aspectRatio = state.aspectRatio;
       this.saveState(next);
@@ -307,12 +338,19 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
           y: 0.4 + Math.floor(currentPlayers.length / 4) * 0.2,
         },
         score: existing?.score ?? 0,
+        lives: existing?.lives ?? GAME_CONFIG.startingLives,
+        eliminated: existing?.eliminated ?? false,
       };
       socket.serializeAttachment({ ...attachment, player });
       state.players = currentPlayers.some((candidate) => candidate.id === player.id)
         ? currentPlayers.map((candidate) => (candidate.id === player.id ? player : candidate))
         : [...currentPlayers, player];
+
+      if (state.phase === "playing" && !state.itPlayerId) {
+        this.assignReplacementIt(state);
+      }
       this.saveState(state);
+      if (state.roundEndsAt) await this.ctx.storage.setAlarm(state.roundEndsAt);
       this.broadcastSnapshot(state);
       return;
     }
@@ -338,6 +376,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     if (message.type !== "cursor") return;
     const now = Date.now();
     if (state.phase !== "playing") return;
+    if (attachment.player.eliminated) return;
 
     if (state.roundEndsAt && now >= state.roundEndsAt) {
       await this.handleTimeout(state);
@@ -371,7 +410,14 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
 
     const players = this.mergePlayers(state);
     const itPlayer = players.find((candidate) => candidate.id === state.itPlayerId);
-    if (!itPlayer?.connected) return;
+    if (!itPlayer?.connected || itPlayer.eliminated) return;
+    if (
+      state.protectedPlayerId === itPlayer.id &&
+      state.invulnerableUntil &&
+      now < state.invulnerableUntil
+    ) {
+      return;
+    }
 
     const movingPlayer = players.find((candidate) => candidate.id === player.id) ?? player;
     const tagTarget =
@@ -380,6 +426,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
             (candidate) =>
               candidate.id !== itPlayer.id &&
               candidate.connected &&
+              !candidate.eliminated &&
               this.collides(position, candidate.position, state.aspectRatio),
           )
         : this.collides(position, itPlayer.position, state.aspectRatio)
@@ -397,16 +444,26 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     taggedPlayer: RoomPlayer,
   ) {
     const now = Date.now();
-    const duration = randomRoundDurationMs();
     state.players = players.map((player) =>
       player.id === itPlayer.id ? { ...player, score: player.score + 1 } : player,
     );
-    state.itPlayerId = taggedPlayer.id;
+    if (state.round >= GAME_CONFIG.maxRounds) {
+      this.finishGame(state);
+      this.saveState(state);
+      await this.ctx.storage.deleteAlarm();
+      this.sendToAll({ type: "tag", payload: this.snapshot(state) });
+      return;
+    }
+
     state.round += 1;
+    const duration = randomRoundDurationMs(state.round);
+    state.itPlayerId = taggedPlayer.id;
     state.roundDurationMs = duration;
     state.roundEndsAt = now + duration;
     state.freezeUntil = now + GAME_CONFIG.freezeMs;
     state.frozenPlayerIds = [itPlayer.id, taggedPlayer.id];
+    state.protectedPlayerId = taggedPlayer.id;
+    state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
     state.impact = {
       id: crypto.randomUUID(),
       x: (itPlayer.position.x + taggedPlayer.position.x) / 2,
@@ -423,15 +480,41 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
   private async handleTimeout(state: StoredRoom) {
     const timedOutPlayerId = state.itPlayerId;
     const players = this.mergePlayers(state).map((player) =>
-      player.id === timedOutPlayerId ? { ...player, score: player.score - 1 } : player,
+      player.id === timedOutPlayerId
+        ? {
+            ...player,
+            score: player.score - 1,
+            lives: Math.max(0, player.lives - 1),
+            eliminated: player.lives <= 1,
+          }
+        : player,
     );
     state.players = players;
-    state.round += 1;
     state.freezeUntil = null;
     state.frozenPlayerIds = [];
+    state.protectedPlayerId = null;
+    state.invulnerableUntil = null;
     state.impact = null;
 
-    const eligible = players.filter((player) => player.connected && player.calibrated);
+    const survivors = players.filter((player) => !player.eliminated);
+    if (survivors.length <= 1 || state.round >= GAME_CONFIG.maxRounds) {
+      this.finishGame(state);
+      this.saveState(state);
+      await this.ctx.storage.deleteAlarm();
+      this.sendToAll({
+        type: "timeout",
+        payload: {
+          timedOutPlayerId: timedOutPlayerId ?? "",
+          snapshot: this.snapshot(state),
+        },
+      });
+      return;
+    }
+
+    state.round += 1;
+    const eligible = players.filter(
+      (player) => player.connected && player.calibrated && !player.eliminated,
+    );
     if (eligible.length < GAME_CONFIG.minPlayers) {
       state.itPlayerId = null;
       state.roundEndsAt = null;
@@ -440,10 +523,13 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     } else {
       const alternatives = eligible.filter((player) => player.id !== timedOutPlayerId);
       const pool = alternatives.length ? alternatives : eligible;
-      const duration = randomRoundDurationMs();
+      const duration = randomRoundDurationMs(state.round);
+      const now = Date.now();
       state.itPlayerId = pool[randomIndex(pool.length)].id;
       state.roundDurationMs = duration;
-      state.roundEndsAt = Date.now() + duration;
+      state.roundEndsAt = now + duration;
+      state.protectedPlayerId = state.itPlayerId;
+      state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
       await this.ctx.storage.setAlarm(state.roundEndsAt);
     }
 
@@ -455,22 +541,42 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
   }
 
   private assignReplacementIt(state: StoredRoom, excludedId?: string) {
-    const eligible = this.mergePlayers(state).filter(
-      (player) => player.connected && player.calibrated && player.id !== excludedId,
+    const active = this.mergePlayers(state).filter(
+      (player) => player.connected && player.calibrated && !player.eliminated,
     );
-    if (eligible.length < GAME_CONFIG.minPlayers) {
+    if (active.length < GAME_CONFIG.minPlayers) {
       state.itPlayerId = null;
       state.roundEndsAt = null;
       state.roundDurationMs = null;
       return;
     }
-    const duration = randomRoundDurationMs();
-    state.itPlayerId = eligible[randomIndex(eligible.length)].id;
     state.round += 1;
+    if (state.round > GAME_CONFIG.maxRounds) {
+      this.finishGame(state);
+      return;
+    }
+    const candidates = active.filter((player) => player.id !== excludedId);
+    const pool = candidates.length ? candidates : active;
+    const duration = randomRoundDurationMs(state.round);
+    const now = Date.now();
+    state.itPlayerId = pool[randomIndex(pool.length)].id;
     state.roundDurationMs = duration;
-    state.roundEndsAt = Date.now() + duration;
+    state.roundEndsAt = now + duration;
     state.freezeUntil = null;
     state.frozenPlayerIds = [];
+    state.protectedPlayerId = state.itPlayerId;
+    state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
+  }
+
+  private finishGame(state: StoredRoom) {
+    state.phase = "finished";
+    state.itPlayerId = null;
+    state.roundEndsAt = null;
+    state.roundDurationMs = null;
+    state.freezeUntil = null;
+    state.frozenPlayerIds = [];
+    state.protectedPlayerId = null;
+    state.invulnerableUntil = null;
   }
 
   private collides(a: CursorPosition, b: CursorPosition, aspectRatio: number) {
@@ -492,7 +598,32 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       .toArray()[0];
     if (!row) return { ...defaultRoom(), maxPlayers: this.maxPlayers() };
     try {
-      return { ...defaultRoom(), ...JSON.parse(row.json), maxPlayers: this.maxPlayers() };
+      const parsed = JSON.parse(row.json) as Partial<StoredRoom>;
+      const restored: StoredRoom = {
+        ...defaultRoom(),
+        ...parsed,
+        players: (parsed.players ?? []).map((player) => ({
+          ...player,
+          lives:
+            typeof player.lives === "number"
+              ? player.lives
+              : GAME_CONFIG.startingLives,
+          eliminated:
+            typeof player.eliminated === "boolean"
+              ? player.eliminated
+              : false,
+        })),
+        maxPlayers: this.maxPlayers(),
+        maxLives: GAME_CONFIG.startingLives,
+        maxRounds: GAME_CONFIG.maxRounds,
+      };
+      if (
+        restored.phase === "playing" &&
+        restored.round > GAME_CONFIG.maxRounds
+      ) {
+        this.finishGame(restored);
+      }
+      return restored;
     } catch {
       return { ...defaultRoom(), maxPlayers: this.maxPlayers() };
     }
@@ -520,6 +651,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
           ...stored,
           ...attachment.player,
           score: stored?.score ?? attachment.player.score,
+          lives: stored?.lives ?? attachment.player.lives,
+          eliminated: stored?.eliminated ?? attachment.player.eliminated,
           connected: true,
         });
       }
