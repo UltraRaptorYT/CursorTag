@@ -15,6 +15,14 @@ export const GAME_CONFIG = {
   minimumRoundDecreaseMs: 500,
 } as const;
 
+export const POWER_UP_CONFIG = {
+  onField: 2,
+  pickupRadius: 0.045,
+  shieldMs: 4_000,
+  freezeMs: 1_000,
+  bonusPoints: 2,
+} as const;
+
 export const PLAYER_COLORS = [
   "#ff5c5c",
   "#7c5cff",

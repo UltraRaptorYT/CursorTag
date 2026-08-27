@@ -7,8 +7,10 @@ Cursor Tag is a disposable, browser-based multiplayer party game. Players join f
 - One connected player is randomly selected as **it**.
 - Every player starts with 3 lives. The chaser scores `+1` by colliding with another cursor. Both cursors freeze for 300 ms, the tagged player becomes it, and receives a 1.5-second shield against an instant re-tag.
 - If time expires, the chaser loses `1` point and one life. At zero lives their cursor is eliminated from collisions.
+- Calibrated phones can move immediately in the warm-up arena before the host starts the round.
+- Each round spawns two power-ups: a 4-second tag shield, a 1-second rival freeze, or a `+2` point bonus.
 - The randomized timer gets faster every round: it begins at 15–30 seconds and tightens to a 7–12 second endgame.
-- The last surviving cursor wins. A 24-round cap guarantees a result if nobody runs out of lives.
+- The last surviving cursor wins. A 10-round cap guarantees a result if nobody runs out of lives.
 - Disconnected cursors get a 10-second reconnect grace period, then leave the room automatically. A disconnected chaser is released immediately so the game cannot get stuck.
 - Rooms support 2–8 players by default. Change `MAX_PLAYERS` in `cloudflare/wrangler.jsonc` to use a different cap (2–16).
 

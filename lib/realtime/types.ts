@@ -5,6 +5,20 @@ export type CursorPosition = {
   y: number;
 };
 
+export type PowerUpType = "shield" | "freeze" | "bonus";
+
+export type ArenaPowerUp = CursorPosition & {
+  id: string;
+  type: PowerUpType;
+};
+
+export type PowerUpEvent = {
+  id: string;
+  type: PowerUpType;
+  playerId: string;
+  at: number;
+};
+
 export type RoomPlayer = {
   id: string;
   name: string;
@@ -15,6 +29,7 @@ export type RoomPlayer = {
   score: number;
   lives: number;
   eliminated: boolean;
+  shieldUntil: number | null;
 };
 
 export type Impact = {
@@ -39,6 +54,8 @@ export type RoomSnapshot = {
   protectedPlayerId: string | null;
   invulnerableUntil: number | null;
   impact: Impact | null;
+  powerUps: ArenaPowerUp[];
+  powerUpEvent: PowerUpEvent | null;
   maxPlayers: number;
   maxLives: number;
   maxRounds: number;

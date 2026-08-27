@@ -11,10 +11,10 @@ export type AirMouseAim = {
 export const AIR_MOUSE_CONFIG = {
   horizontalAimRangeDegrees: 32,
   verticalAimRangeDegrees: 24,
-  smoothing: 0.35,
-  sendIntervalMs: 50,
-  aimChangeThreshold: 0.002,
-  deadZoneDegrees: 1.5,
+  smoothing: 0.58,
+  sendIntervalMs: 30,
+  aimChangeThreshold: 0.001,
+  deadZoneDegrees: 0.9,
 } as const;
 
 function normalizeAngleDelta(current: number, previous: number) {
@@ -65,4 +65,3 @@ export function calculateAirMouseAim(
       (rawAim.y - previousAim.y) * AIR_MOUSE_CONFIG.smoothing,
   };
 }
-

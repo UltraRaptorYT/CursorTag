@@ -10,6 +10,8 @@ import {
   LoaderCircle,
   Play,
   RotateCcw,
+  Snowflake,
+  Sparkles,
   Smartphone,
   Star,
   ShieldCheck,
@@ -22,7 +24,7 @@ import {
 import { CursorTagLogo } from "@/components/cursor-tag-logo";
 import { GAME_CONFIG, generateRoomCode, sanitizeRoomCode } from "@/lib/game/config";
 import { createRoomSocket, type RoomConnectionStatus, type RoomSocket } from "@/lib/realtime/room";
-import type { RoomPlayer, RoomSnapshot, ServerRoomMessage } from "@/lib/realtime/types";
+import type { ArenaPowerUp, PowerUpType, RoomPlayer, RoomSnapshot, ServerRoomMessage } from "@/lib/realtime/types";
 
 function emptySnapshot(): RoomSnapshot {
   return {
@@ -38,6 +40,8 @@ function emptySnapshot(): RoomSnapshot {
     protectedPlayerId: null,
     invulnerableUntil: null,
     impact: null,
+    powerUps: [],
+    powerUpEvent: null,
     maxPlayers: GAME_CONFIG.maxPlayers,
     maxLives: GAME_CONFIG.startingLives,
     maxRounds: GAME_CONFIG.maxRounds,
@@ -228,23 +232,33 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
                 <p className="mt-2 text-sm font-semibold text-white/35">or visit this page and enter the code</p>
               </div>
             </div>
+            <div className="mt-7 grid max-w-xl grid-cols-3 gap-2">
+              <RuleCard number="1" title="Tilt to move" detail="Your phone controls your colored cursor." />
+              <RuleCard number="2" title="Tag for +1" detail="The red star chases the other players." />
+              <RuleCard number="3" title="Save lives" detail="A timeout costs one. Most lives wins." />
+            </div>
+            <p className="mt-3 max-w-xl text-xs font-bold text-white/35">Power-ups: shield blocks tags · snowflake freezes rivals · sparkles give +2 points.</p>
           </div>
 
           <div className="rounded-[2rem] border border-white/10 bg-white/[.055] p-5 shadow-2xl backdrop-blur-sm sm:p-7">
             <div className="flex items-end justify-between border-b border-white/8 pb-5">
               <div>
-                <p className="text-xs font-black uppercase tracking-[.18em] text-white/35">Players</p>
-                <p className="mt-1 text-3xl font-black tracking-[-.04em]">{snapshot.players.length} / {snapshot.maxPlayers}</p>
+                <p className="text-xs font-black uppercase tracking-[.18em] text-[#b7ff45]">Live warm-up</p>
+                <p className="mt-1 text-3xl font-black tracking-[-.04em]">Move around now</p>
               </div>
-              <Users className="size-7 text-[#7c5cff]" />
+              <span className="flex items-center gap-2 text-sm font-black text-white/45"><Users className="size-5 text-[#7c5cff]" />{snapshot.players.length} / {snapshot.maxPlayers}</span>
             </div>
 
-            <div className="mt-5 grid min-h-64 content-start gap-3 sm:grid-cols-2">
-              {snapshot.players.length === 0 ? (
-                <div className="col-span-full grid min-h-56 place-items-center rounded-2xl border border-dashed border-white/12 text-center">
-                  <div><Smartphone className="mx-auto size-8 text-white/20" /><p className="mt-3 font-bold text-white/35">Waiting for the first phone…</p></div>
+            <div className="relative mt-5 min-h-72 overflow-hidden rounded-2xl border border-white/8 bg-[#0f110e]">
+              <div className="arena-grid absolute inset-0 opacity-35" />
+              {eligiblePlayers.length === 0 ? (
+                <div className="absolute inset-0 grid place-items-center text-center">
+                  <div><Smartphone className="mx-auto size-8 text-white/20" /><p className="mt-3 font-bold text-white/35">Join and calibrate to try your cursor</p></div>
                 </div>
-              ) : snapshot.players.map((player) => <LobbyPlayer key={player.id} player={player} />)}
+              ) : eligiblePlayers.map((player) => <PracticeCursor key={player.id} player={player} />)}
+              {snapshot.players.length > 0 && <div className="absolute inset-x-3 bottom-3 flex flex-wrap gap-2">
+                {snapshot.players.map((player) => <LobbyPlayer key={player.id} player={player} compact />)}
+              </div>}
             </div>
 
             <button type="button" disabled={!canStart} onClick={() => void startGame()} className="mt-6 flex h-16 w-full items-center justify-center gap-3 rounded-2xl bg-[#b7ff45] text-lg font-black text-[#10120f] shadow-[0_7px_0_#648d20] transition active:translate-y-1 active:shadow-[0_2px_0_#648d20] disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/25 disabled:shadow-none">
@@ -274,6 +288,25 @@ function CalibrationTarget() {
   );
 }
 
+function RuleCard({ number, title, detail }: { number: string; title: string; detail: string }) {
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/[.04] p-3">
+      <span className="font-mono text-[10px] font-black text-[#b7ff45]">{number}</span>
+      <p className="mt-1 text-xs font-black text-white/80">{title}</p>
+      <p className="mt-1 text-[10px] font-semibold leading-snug text-white/35">{detail}</p>
+    </div>
+  );
+}
+
+function PracticeCursor({ player }: { player: RoomPlayer }) {
+  return (
+    <div className="practice-cursor pointer-events-none absolute z-10" style={{ left: `${player.position.x * 100}%`, top: `${player.position.y * 100}%` }}>
+      <span className="absolute bottom-12 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md px-2 py-1 text-[10px] font-black text-[#10120f]" style={{ backgroundColor: player.color }}>{player.name}</span>
+      <span className="grid size-10 place-items-center rounded-full border-4 border-white shadow-xl" style={{ backgroundColor: player.color }}><span className="size-1.5 rounded-full bg-white" /></span>
+    </div>
+  );
+}
+
 function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; now: number; notice: string | null; onEnd: () => void }) {
   const itPlayer = snapshot.players.find((player) => player.id === snapshot.itPlayerId);
   const remaining = snapshot.roundEndsAt ? Math.max(0, snapshot.roundEndsAt - now) : 0;
@@ -283,6 +316,12 @@ function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; 
   const readyPlayers = snapshot.players.filter(
     (player) => player.connected && player.calibrated && !player.eliminated,
   ).length;
+  const recentPowerUp = snapshot.powerUpEvent && now - snapshot.powerUpEvent.at < 1_200
+    ? snapshot.powerUpEvent
+    : null;
+  const powerUpPlayer = recentPowerUp
+    ? snapshot.players.find((player) => player.id === recentPowerUp.playerId)
+    : null;
 
   return (
     <main className="game-screen relative h-dvh cursor-none overflow-hidden bg-[#0d0f0c] text-white">
@@ -305,7 +344,10 @@ function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; 
         </div>
       </div>
 
-      {snapshot.players.map((player) => <LiveCursor key={player.id} player={player} isIt={player.id === snapshot.itPlayerId} frozen={Boolean(snapshot.freezeUntil && now < snapshot.freezeUntil && snapshot.frozenPlayerIds.includes(player.id))} protectedFromTag={Boolean(snapshot.protectedPlayerId === player.id && snapshot.invulnerableUntil && now < snapshot.invulnerableUntil)} />)}
+      {snapshot.powerUps.map((powerUp) => <ArenaPowerUpView key={powerUp.id} powerUp={powerUp} />)}
+      {snapshot.players.map((player) => <LiveCursor key={player.id} player={player} isIt={player.id === snapshot.itPlayerId} frozen={Boolean(snapshot.freezeUntil && now < snapshot.freezeUntil && snapshot.frozenPlayerIds.includes(player.id))} protectedFromTag={Boolean((snapshot.protectedPlayerId === player.id && snapshot.invulnerableUntil && now < snapshot.invulnerableUntil) || (player.shieldUntil && now < player.shieldUntil))} />)}
+
+      {recentPowerUp && powerUpPlayer && <PowerUpToast type={recentPowerUp.type} playerName={powerUpPlayer.name} />}
 
       <div className="pointer-events-none absolute bottom-6 left-6 z-10 flex max-w-[75vw] flex-wrap gap-2">
         {snapshot.players.map((player) => (
@@ -333,6 +375,36 @@ function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; 
   );
 }
 
+const POWER_UP_STYLE: Record<PowerUpType, { label: string; className: string }> = {
+  shield: { label: "Shield", className: "border-[#b7ff45] bg-[#b7ff45] text-[#10120f] shadow-[0_0_28px_rgba(183,255,69,.7)]" },
+  freeze: { label: "Freeze", className: "border-[#70dcff] bg-[#70dcff] text-[#0b2530] shadow-[0_0_28px_rgba(112,220,255,.7)]" },
+  bonus: { label: "+2", className: "border-[#ffbe3d] bg-[#ffbe3d] text-[#2a1b00] shadow-[0_0_28px_rgba(255,190,61,.7)]" },
+};
+
+function PowerUpIcon({ type, className = "size-5" }: { type: PowerUpType; className?: string }) {
+  if (type === "shield") return <ShieldCheck className={className} />;
+  if (type === "freeze") return <Snowflake className={className} />;
+  return <Sparkles className={className} />;
+}
+
+function ArenaPowerUpView({ powerUp }: { powerUp: ArenaPowerUp }) {
+  const style = POWER_UP_STYLE[powerUp.type];
+  return (
+    <div className="arena-power-up pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 text-center" style={{ left: `${powerUp.x * 100}%`, top: `${powerUp.y * 100}%` }}>
+      <span className={`grid size-11 place-items-center rounded-full border-4 border-white ${style.className}`}><PowerUpIcon type={powerUp.type} /></span>
+      <span className="mt-2 block rounded bg-black/55 px-2 py-1 text-[9px] font-black uppercase tracking-[.12em] text-white/70">{style.label}</span>
+    </div>
+  );
+}
+
+function PowerUpToast({ type, playerName }: { type: PowerUpType; playerName: string }) {
+  return (
+    <div className="power-up-toast pointer-events-none absolute left-1/2 top-[30%] z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-white/15 bg-[#10120f]/92 px-5 py-3 text-sm font-black uppercase tracking-[.1em] text-white shadow-2xl backdrop-blur">
+      <PowerUpIcon type={type} className="size-5 text-[#b7ff45]" /> {playerName} grabbed {POWER_UP_STYLE[type].label}
+    </div>
+  );
+}
+
 function LiveCursor({ player, isIt, frozen, protectedFromTag }: { player: RoomPlayer; isIt: boolean; frozen: boolean; protectedFromTag: boolean }) {
   return (
     <div className={`live-cursor pointer-events-none absolute left-0 top-0 z-20 ${isIt ? "is-it" : ""} ${player.connected ? "" : "is-disconnected"} ${frozen ? "is-frozen" : ""} ${protectedFromTag ? "is-protected" : ""} ${player.eliminated ? "is-eliminated" : ""}`} style={{ transform: `translate3d(calc(${player.position.x * 100}vw - 28px), calc(${player.position.y * 100}vh - 28px), 0)` }}>
@@ -347,7 +419,16 @@ function LiveCursor({ player, isIt, frozen, protectedFromTag }: { player: RoomPl
   );
 }
 
-function LobbyPlayer({ player }: { player: RoomPlayer }) {
+function LobbyPlayer({ player, compact = false }: { player: RoomPlayer; compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className={`flex items-center gap-2 rounded-lg border border-white/8 bg-black/65 px-2.5 py-1.5 text-[10px] font-black backdrop-blur ${player.connected ? "" : "opacity-45"}`}>
+        <span className="size-2.5 rounded-full" style={{ backgroundColor: player.color }} />
+        <span>{player.name}</span>
+        <span className={player.calibrated ? "text-[#b7ff45]" : "text-white/35"}>{player.calibrated ? "Ready" : "Calibrating"}</span>
+      </div>
+    );
+  }
   return (
     <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${player.connected ? "border-white/8 bg-black/15" : "border-white/5 bg-black/10 opacity-45"}`}>
       <span className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-black text-[#10120f]" style={{ backgroundColor: player.color }}>{player.name.charAt(0).toUpperCase()}</span>

@@ -131,7 +131,21 @@ button:not(:disabled) {
 
 .live-cursor {
   will-change: transform;
-  transition: transform 80ms linear, opacity 180ms ease;
+  transition: transform 45ms linear, opacity 180ms ease;
+}
+
+.practice-cursor {
+  transform: translate3d(-50%, -50%, 0);
+  transition: left 45ms linear, top 45ms linear, opacity 180ms ease;
+  will-change: left, top;
+}
+
+.arena-power-up {
+  animation: power-up-float 1.1s ease-in-out infinite alternate;
+}
+
+.power-up-toast {
+  animation: power-up-toast 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .live-cursor .cursor-orb {
@@ -273,6 +287,16 @@ button:not(:disabled) {
   to { transform: scale(1.025); filter: brightness(1.08); }
 }
 
+@keyframes power-up-float {
+  to { transform: translate(-50%, calc(-50% - 7px)) scale(1.06); }
+}
+
+@keyframes power-up-toast {
+  0% { opacity: 0; transform: translate(-50%, 18px) scale(0.85); }
+  20%, 75% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -10px) scale(1.03); }
+}
+
 @keyframes shield-pulse {
   to {
     outline-width: 9px;
@@ -290,7 +314,9 @@ button:not(:disabled) {
   }
 
   .calibration-preview-target,
-  .calibration-target > div:first-child {
+  .calibration-target > div:first-child,
+  .arena-power-up,
+  .power-up-toast {
     animation: none;
   }
 }

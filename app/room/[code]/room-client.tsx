@@ -56,6 +56,8 @@ function emptySnapshot(): RoomSnapshot {
     protectedPlayerId: null,
     invulnerableUntil: null,
     impact: null,
+    powerUps: [],
+    powerUpEvent: null,
     maxPlayers: GAME_CONFIG.maxPlayers,
     maxLives: GAME_CONFIG.startingLives,
     maxRounds: GAME_CONFIG.maxRounds,
@@ -206,11 +208,15 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     };
   }, [roomCode]);
 
+  const localShieldUntil = snapshot.players.find(
+    (candidate) => candidate.id === playerId,
+  )?.shieldUntil;
+
   useEffect(() => {
-    if (!snapshot.invulnerableUntil || snapshot.phase !== "playing") return;
+    if ((!snapshot.invulnerableUntil && !localShieldUntil) || snapshot.phase !== "playing") return;
     const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
-  }, [snapshot.invulnerableUntil, snapshot.phase]);
+  }, [localShieldUntil, snapshot.invulnerableUntil, snapshot.phase]);
 
   useEffect(() => {
     if (sensorStatus !== "active") return;
@@ -225,7 +231,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       }
 
       const origin = originRef.current;
-      if (!origin || !calibratedRef.current || snapshotRef.current.phase !== "playing") return;
+      if (!origin || !calibratedRef.current || snapshotRef.current.phase === "finished") return;
       const next = calculateAirMouseAim(
         current,
         origin,
@@ -335,7 +341,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     }
     socketRef.current?.send({ type: "calibrated" });
 
-    if (snapshotRef.current.phase === "playing") {
+    if (snapshotRef.current.phase !== "finished") {
       const sentAt = performance.now();
       lastSentAimRef.current = { x: 0, y: 0 };
       lastSentAtRef.current = sentAt;
@@ -396,10 +402,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const selectedColor = playerColorFromHue(playerHue);
   const isIt = snapshot.itPlayerId === playerId;
   const isProtected = Boolean(
-    isIt &&
+    (isIt &&
       snapshot.protectedPlayerId === playerId &&
       snapshot.invulnerableUntil &&
-      now < snapshot.invulnerableUntil,
+      now < snapshot.invulnerableUntil) ||
+      (player?.shieldUntil && now < player.shieldUntil),
   );
 
   if (roomUnavailable) {
@@ -547,8 +554,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <div className="grid size-24 place-items-center rounded-[2rem] text-4xl font-black text-[#10120f] shadow-xl" style={{ backgroundColor: player?.color ?? "#b7ff45" }}>{nickname.charAt(0).toUpperCase()}</div>
           <span className="phone-eyebrow mt-7">Calibrated & ready</span>
           <h1 className="mt-3 text-4xl font-black tracking-[-.05em]">YOU’RE IN, {nickname.toUpperCase()}.</h1>
-          <p className="mt-4 max-w-xs text-white/50">Keep this page open. Your cursor will appear when the host starts.</p>
-          <div className="mt-7 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm"><LoaderCircle className="size-4 animate-spin text-[#9b87ff]" /> Waiting for the host</div>
+          <p className="mt-4 max-w-xs text-white/50">Move your phone now—your cursor is already live in the warm-up arena on the big screen.</p>
+          <div className="mt-7 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm"><Move3d className="size-4 text-[#9b87ff]" /> Warm up while others join</div>
         </div>
       </PhoneShell>
     );

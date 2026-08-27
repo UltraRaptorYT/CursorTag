@@ -54,7 +54,7 @@ export default function HomePage() {
               TILT.<br />CHASE.<br /><span className="text-[#b7ff45]">TAG.</span>
             </h1>
             <p className="mt-8 max-w-xl text-lg font-medium leading-relaxed text-white/55 sm:text-xl">
-              Turn every phone in the room into a live cursor. One player is it. Catch someone before the clock catches you.
+              Tilt to move your colored cursor. The red star is the chaser: tag someone for +1, but let the timer run out and you lose a life. Most lives wins.
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
