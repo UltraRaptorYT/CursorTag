@@ -24,7 +24,7 @@ import {
 import { CursorTagLogo } from "@/components/cursor-tag-logo";
 import { GAME_CONFIG, generateRoomCode, sanitizeRoomCode } from "@/lib/game/config";
 import { createRoomSocket, type RoomConnectionStatus, type RoomSocket } from "@/lib/realtime/room";
-import type { ArenaPowerUp, PowerUpType, RoomPlayer, RoomSnapshot, ServerRoomMessage } from "@/lib/realtime/types";
+import { normalizeRoomSnapshot, type ArenaPowerUp, type PowerUpType, type RoomPlayer, type RoomSnapshot, type ServerRoomMessage } from "@/lib/realtime/types";
 
 function emptySnapshot(): RoomSnapshot {
   return {
@@ -80,17 +80,17 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
 
     function handleMessage(message: ServerRoomMessage) {
       if (message.type === "connected") {
-        setSnapshot(message.payload.snapshot);
+        setSnapshot(normalizeRoomSnapshot(message.payload.snapshot));
         if (message.payload.snapshot.phase === "playing") setNow(Date.now());
       }
       if (message.type === "snapshot" || message.type === "tag") {
         pendingCursorsRef.current = {};
-        setSnapshot(message.payload);
+        setSnapshot(normalizeRoomSnapshot(message.payload));
         if (message.payload.phase === "playing") setNow(Date.now());
       }
       if (message.type === "timeout") {
         pendingCursorsRef.current = {};
-        setSnapshot(message.payload.snapshot);
+        setSnapshot(normalizeRoomSnapshot(message.payload.snapshot));
         setNow(Date.now());
         const timedOut = message.payload.snapshot.players.find(
           (player) => player.id === message.payload.timedOutPlayerId,

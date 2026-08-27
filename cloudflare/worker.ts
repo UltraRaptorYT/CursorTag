@@ -877,13 +877,13 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
   }
 
   private saveState(state: StoredRoom) {
-    this.stateCache = state;
     this.ctx.storage.sql.exec(
       `INSERT INTO room_state (id, json, updated_at) VALUES (1, ?, ?)
        ON CONFLICT(id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`,
       JSON.stringify(state),
       Date.now(),
     );
+    this.stateCache = state;
   }
 
   private mergePlayers(state: StoredRoom) {

@@ -34,7 +34,7 @@ import {
   type AirMouseOrientation,
 } from "@/lib/input/airmouse";
 import { createRoomSocket, type RoomConnectionStatus, type RoomSocket } from "@/lib/realtime/room";
-import type { RoomSnapshot, ServerRoomMessage } from "@/lib/realtime/types";
+import { normalizeRoomSnapshot, type RoomSnapshot, type ServerRoomMessage } from "@/lib/realtime/types";
 
 type SensorStatus = "idle" | "requesting" | "active" | "denied" | "unsupported";
 type CalibrationStep = "aim" | "steady" | "done";
@@ -162,15 +162,15 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         return;
       }
       if (message.type === "connected") {
-        setSnapshot(message.payload.snapshot);
+        setSnapshot(normalizeRoomSnapshot(message.payload.snapshot));
         if (message.payload.snapshot.phase === "playing") setNow(Date.now());
       }
       if (message.type === "snapshot" || message.type === "tag") {
-        setSnapshot(message.payload);
+        setSnapshot(normalizeRoomSnapshot(message.payload));
         if (message.payload.phase === "playing") setNow(Date.now());
       }
       if (message.type === "timeout") {
-        setSnapshot(message.payload.snapshot);
+        setSnapshot(normalizeRoomSnapshot(message.payload.snapshot));
         setNow(Date.now());
       }
       if (message.type === "pong") {

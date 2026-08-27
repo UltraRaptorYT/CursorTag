@@ -62,6 +62,18 @@ export type RoomSnapshot = {
   collisionRadius: number;
 };
 
+export function normalizeRoomSnapshot(snapshot: RoomSnapshot): RoomSnapshot {
+  return {
+    ...snapshot,
+    players: snapshot.players.map((player) => ({
+      ...player,
+      shieldUntil: player.shieldUntil ?? null,
+    })),
+    powerUps: Array.isArray(snapshot.powerUps) ? snapshot.powerUps : [],
+    powerUpEvent: snapshot.powerUpEvent ?? null,
+  };
+}
+
 export type ClientRoomMessage =
   | { type: "join"; payload: { name: string; hue?: number; calibrated?: boolean } }
   | { type: "calibrated" }
