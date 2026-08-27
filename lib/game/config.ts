@@ -5,9 +5,9 @@ export const GAME_CONFIG = {
   freezeMs: 300,
   tagImmunityMs: 1_500,
   startingLives: 3,
-  maxRounds: 15,
-  minRoundSeconds: 15,
-  maxRoundSeconds: 30,
+  maxRounds: 10,
+  minRoundSeconds: 10,
+  maxRoundSeconds: 20,
   fastestMinRoundSeconds: 7,
   fastestMaxRoundSeconds: 12,
   minRoundDecayPerRound: 0.75,
@@ -25,6 +25,17 @@ export const PLAYER_COLORS = [
   "#b6f24a",
   "#ff8f4a",
 ] as const;
+
+export const DEFAULT_PLAYER_HUE = 255;
+
+export function normalizePlayerHue(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_PLAYER_HUE;
+  return ((Math.round(value) % 360) + 360) % 360;
+}
+
+export function playerColorFromHue(hue: number) {
+  return `hsl(${normalizePlayerHue(hue)} 84% 62%)`;
+}
 
 export function sanitizeRoomCode(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);

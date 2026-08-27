@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   ArrowRight,
+  Check,
   CircleAlert,
-  Crosshair,
+  CircleDot,
   Eye,
   Heart,
   LoaderCircle,
@@ -21,7 +22,12 @@ import {
 } from "lucide-react";
 
 import { CursorTagLogo } from "@/components/cursor-tag-logo";
-import { GAME_CONFIG } from "@/lib/game/config";
+import {
+  DEFAULT_PLAYER_HUE,
+  GAME_CONFIG,
+  normalizePlayerHue,
+  playerColorFromHue,
+} from "@/lib/game/config";
 import {
   AIR_MOUSE_CONFIG,
   calculateAirMouseAim,
@@ -31,6 +37,7 @@ import { createRoomSocket, type RoomConnectionStatus, type RoomSocket } from "@/
 import type { RoomSnapshot, ServerRoomMessage } from "@/lib/realtime/types";
 
 type SensorStatus = "idle" | "requesting" | "active" | "denied" | "unsupported";
+type CalibrationStep = "aim" | "steady" | "done";
 type PermissionCapableOrientation = typeof DeviceOrientationEvent & {
   requestPermission?: () => Promise<"granted" | "denied">;
 };
@@ -66,11 +73,11 @@ function getPlayerId(roomCode: string) {
 }
 
 export default function RoomClient({ roomCode }: { roomCode: string }) {
-  const router = useRouter();
   const [status, setStatus] = useState<RoomConnectionStatus>("connecting");
   const [snapshot, setSnapshot] = useState<RoomSnapshot>(emptySnapshot);
   const [playerId, setPlayerId] = useState("");
   const [nickname, setNickname] = useState("");
+  const [playerHue, setPlayerHue] = useState(DEFAULT_PLAYER_HUE);
   const [joined, setJoined] = useState(false);
   const [calibrated, setCalibrated] = useState(false);
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>("idle");
@@ -79,10 +86,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [now, setNow] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [neutralReset, setNeutralReset] = useState(false);
+  const [roomUnavailable, setRoomUnavailable] = useState(false);
+  const [calibrationStep, setCalibrationStep] = useState<CalibrationStep>("aim");
+  const [calibrationCountdown, setCalibrationCountdown] = useState(3);
 
   const socketRef = useRef<RoomSocket | null>(null);
   const joinedRef = useRef(false);
   const nicknameRef = useRef("");
+  const playerHueRef = useRef(DEFAULT_PLAYER_HUE);
   const currentReadingRef = useRef<AirMouseOrientation | null>(null);
   const originRef = useRef<AirMouseOrientation | null>(null);
   const smoothedAimRef = useRef({ x: 0, y: 0 });
@@ -93,10 +104,15 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const snapshotRef = useRef(snapshot);
   const hasReadingRef = useRef(false);
   const roomClosedRef = useRef(false);
+  const calibrationTimersRef = useRef<number[]>([]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
+
+  useEffect(() => () => {
+    for (const timer of calibrationTimersRef.current) window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (sensorStatus !== "idle") return;
@@ -116,12 +132,17 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   useEffect(() => {
     const id = getPlayerId(roomCode);
     const storedName = localStorage.getItem("cursor-tag-nickname") ?? "";
+    const storedHue = normalizePlayerHue(
+      Number(localStorage.getItem("cursor-tag-player-hue") ?? DEFAULT_PLAYER_HUE),
+    );
     const wasJoined = sessionStorage.getItem(`cursor-tag-joined-${roomCode}`) === "true";
     nicknameRef.current = storedName;
+    playerHueRef.current = storedHue;
     joinedRef.current = wasJoined;
     const hydrationTimer = window.setTimeout(() => {
       setPlayerId(id);
       setNickname(storedName);
+      setPlayerHue(storedHue);
       setJoined(wasJoined);
     }, 0);
 
@@ -131,8 +152,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         roomClosedRef.current = true;
         joinedRef.current = false;
         sessionStorage.removeItem(`cursor-tag-joined-${roomCode}`);
+        for (const timer of calibrationTimersRef.current) window.clearTimeout(timer);
+        calibrationTimersRef.current = [];
+        setStatus("error");
+        setRoomUnavailable(true);
         socketRef.current?.close();
-        router.replace("/");
         return;
       }
       if (message.type === "connected") {
@@ -161,7 +185,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       onMessage: handleMessage,
       onOpen: () => {
         if (joinedRef.current && nicknameRef.current) {
-          socketRef.current?.send({ type: "join", payload: { name: nicknameRef.current } });
+          socketRef.current?.send({
+            type: "join",
+            payload: {
+              name: nicknameRef.current,
+              hue: playerHueRef.current,
+              calibrated: calibratedRef.current,
+            },
+          });
         }
         socketRef.current?.send({ type: "request-snapshot" });
       },
@@ -173,7 +204,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       socket.close();
       socketRef.current = null;
     };
-  }, [roomCode, router]);
+  }, [roomCode]);
 
   useEffect(() => {
     if (!snapshot.invulnerableUntil || snapshot.phase !== "playing") return;
@@ -269,21 +300,39 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     setNickname(cleanName);
     setJoined(true);
     localStorage.setItem("cursor-tag-nickname", cleanName);
+    localStorage.setItem("cursor-tag-player-hue", String(playerHueRef.current));
     sessionStorage.setItem(`cursor-tag-joined-${roomCode}`, "true");
-    socketRef.current?.send({ type: "join", payload: { name: cleanName } });
+    socketRef.current?.send({
+      type: "join",
+      payload: { name: cleanName, hue: playerHueRef.current },
+    });
+  }
+
+  function chooseHue(value: number) {
+    const nextHue = normalizePlayerHue(value);
+    playerHueRef.current = nextHue;
+    setPlayerHue(nextHue);
+    localStorage.setItem("cursor-tag-player-hue", String(nextHue));
   }
 
   async function enableMotionAgain() {
     await requestMotionAccess();
   }
 
-  function applyNeutralPosition() {
+  function applyNeutralPosition(showReadyStep = false) {
     const reading = currentReadingRef.current;
     if (!reading) return false;
     originRef.current = reading;
     smoothedAimRef.current = { x: 0, y: 0 };
     calibratedRef.current = true;
-    setCalibrated(true);
+    if (showReadyStep) {
+      setCalibrationStep("done");
+      calibrationTimersRef.current.push(
+        window.setTimeout(() => setCalibrated(true), 750),
+      );
+    } else {
+      setCalibrated(true);
+    }
     socketRef.current?.send({ type: "calibrated" });
 
     if (snapshotRef.current.phase === "playing") {
@@ -307,14 +356,33 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     return true;
   }
 
-  async function calibrate() {
-    if (!applyNeutralPosition()) return;
+  async function keepScreenAwake() {
     try {
       const wakeLock = (navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<unknown> } }).wakeLock;
       await wakeLock?.request("screen");
     } catch {
       // Screen Wake Lock is a convenience, not a gameplay requirement.
     }
+  }
+
+  function beginSteadyCalibration() {
+    if (!hasReading || calibrationStep === "steady") return;
+    setCalibrationStep("steady");
+    setCalibrationCountdown(3);
+    navigator.vibrate?.(20);
+
+    calibrationTimersRef.current = [
+      window.setTimeout(() => setCalibrationCountdown(2), 650),
+      window.setTimeout(() => setCalibrationCountdown(1), 1_300),
+      window.setTimeout(() => {
+        if (!applyNeutralPosition(true)) {
+          setCalibrationStep("aim");
+          return;
+        }
+        navigator.vibrate?.(45);
+        void keepScreenAwake();
+      }, 1_950),
+    ];
   }
 
   function recalibrateImmediately() {
@@ -325,6 +393,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   }
 
   const player = snapshot.players.find((candidate) => candidate.id === playerId);
+  const selectedColor = playerColorFromHue(playerHue);
   const isIt = snapshot.itPlayerId === playerId;
   const isProtected = Boolean(
     isIt &&
@@ -333,18 +402,55 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       now < snapshot.invulnerableUntil,
   );
 
+  if (roomUnavailable) {
+    return (
+      <PhoneShell roomCode={roomCode} status="error" latencyMs={null}>
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+          <div className="grid size-20 place-items-center rounded-[1.7rem] border border-[#ff5c5c]/20 bg-[#ff5c5c]/10 text-[#ff9292]"><CircleAlert className="size-9" /></div>
+          <span className="phone-eyebrow mt-7">Room {roomCode}</span>
+          <h1 className="mt-3 text-5xl font-black leading-[.92] tracking-[-.06em]">ROOM NOT<br />FOUND.</h1>
+          <p className="mt-4 max-w-xs text-white/50">This room isn’t open. Check the code, or ask the host to start a new room.</p>
+          <Link href="/" className="mt-8 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_6px_0_#648d20]"><ArrowRight className="size-4 rotate-180" /> Back to home</Link>
+        </div>
+      </PhoneShell>
+    );
+  }
+
   if (!joined) {
     return (
-      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs}>
-        <div className="flex flex-1 flex-col justify-center py-8">
+      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={selectedColor}>
+        <div className="flex flex-1 flex-col justify-center py-6 sm:py-8">
           <span className="phone-eyebrow">Room {roomCode}</span>
-          <h1 className="mt-4 text-5xl font-black leading-[.92] tracking-[-.06em]">PICK A NAME.<br /><span className="text-[#9b87ff]">JOIN THE CHASE.</span></h1>
-          <p className="mt-5 text-base leading-relaxed text-white/50">Your browser will ask for motion access. That turns your phone into the controller.</p>
-          <form onSubmit={joinRoom} className="mt-8 rounded-[1.75rem] border border-white/10 bg-[#191c18] p-5 shadow-[0_20px_70px_rgba(0,0,0,.35)]">
+          <h1 className="mt-4 text-[2.7rem] font-black leading-[.92] tracking-[-.06em] sm:text-5xl">PICK A NAME.<br /><span style={{ color: selectedColor }}>PICK YOUR COLOR.</span></h1>
+          <p className="mt-4 text-sm leading-relaxed text-white/50 sm:text-base">This color is your cursor on the big screen. Drag the hue until it feels unmistakably yours.</p>
+          <form onSubmit={joinRoom} className="mt-6 rounded-[1.75rem] border border-white/10 bg-[#191c18] p-5 shadow-[0_20px_70px_rgba(0,0,0,.35)]">
             <label htmlFor="nickname" className="text-sm font-black">Your name</label>
             <div className="mt-2 flex h-14 items-center rounded-2xl border border-white/8 bg-white/[.055] px-4 focus-within:ring-4 focus-within:ring-[#7c5cff]/20">
               <UserRound className="size-5 text-white/35" />
               <input id="nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={18} autoComplete="nickname" placeholder="e.g. Speedy Sam" className="min-w-0 flex-1 bg-transparent px-3 font-bold text-white outline-none placeholder:text-white/25" />
+            </div>
+            <div className="mt-5 rounded-2xl border border-white/8 bg-black/20 p-4">
+              <div className="flex items-center gap-4">
+                <span className="grid size-16 shrink-0 place-items-center rounded-full border-[5px] border-white shadow-[0_8px_30px_rgba(0,0,0,.35)]" style={{ backgroundColor: selectedColor }} aria-hidden="true">
+                  <span className="size-2 rounded-full bg-white" />
+                </span>
+                <div className="min-w-0 flex-1 text-left">
+                  <label htmlFor="player-hue" className="block text-xs font-black uppercase tracking-[.16em] text-white/45">Your cursor color</label>
+                  <p className="mt-1 text-xl font-black" style={{ color: selectedColor }}>THIS IS YOU</p>
+                  <p className="font-mono text-[11px] font-bold text-white/35">Hue {playerHue}°</p>
+                </div>
+              </div>
+              <input
+                id="player-hue"
+                type="range"
+                min="0"
+                max="359"
+                value={playerHue}
+                onChange={(event) => chooseHue(Number(event.target.value))}
+                aria-label={`Cursor hue ${playerHue} degrees`}
+                className="hue-slider mt-4 w-full"
+                style={{ accentColor: selectedColor, color: selectedColor }}
+              />
             </div>
             <button type="submit" disabled={!nickname.trim() || status !== "connected" || !snapshot.hostConnected || sensorStatus === "requesting"} className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_6px_0_#648d20] active:translate-y-1 active:shadow-[0_2px_0_#648d20] disabled:bg-white/8 disabled:text-white/25 disabled:shadow-none">
               {sensorStatus === "requesting" ? <LoaderCircle className="size-5 animate-spin" /> : <Move3d className="size-5" />}
@@ -363,21 +469,44 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     return (
       <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={player?.color}>
         <div className="flex flex-1 flex-col items-center justify-center py-8 text-center">
-          <div className="relative grid size-28 place-items-center rounded-[2.3rem] bg-[#7c5cff] text-white shadow-[0_18px_55px_rgba(124,92,255,.3)]">
-            <Smartphone className="size-12 calibration-phone" />
-            <span className="absolute -right-2 -top-2 grid size-9 place-items-center rounded-full border-4 border-[#10120f] bg-[#b7ff45] text-[#10120f]"><Crosshair className="size-4" /></span>
+          <div className="mb-7 grid w-full max-w-sm grid-cols-3 gap-2" aria-label="Calibration progress">
+            <CalibrationStepPill number="1" label="Aim" state={calibrationStep === "aim" ? "active" : "complete"} />
+            <CalibrationStepPill number="2" label="Hold" state={calibrationStep === "steady" ? "active" : calibrationStep === "done" ? "complete" : "upcoming"} />
+            <CalibrationStepPill number="3" label="Ready" state={calibrationStep === "done" ? "active" : "upcoming"} />
           </div>
-          <span className="phone-eyebrow mt-8">One quick setup</span>
-          <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">HOLD STILL.<br />SET NEUTRAL.</h1>
-          <p className="mt-4 max-w-xs text-white/50">Hold the phone comfortably, aimed at the middle of the big screen. Small hand tremors will be ignored.</p>
-          {sensorStatus !== "active" ? (
-            <button type="button" onClick={() => void enableMotionAgain()} className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#7c5cff] font-black text-white shadow-[0_7px_0_#4935a5]"><Move3d className="size-5" /> Enable motion</button>
-          ) : (
-            <button type="button" onClick={() => void calibrate()} disabled={!hasReading} className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_7px_0_#789f35] active:translate-y-1 active:shadow-[0_2px_0_#789f35] disabled:opacity-40 disabled:shadow-none">
-              {hasReading ? <Crosshair className="size-5" /> : <LoaderCircle className="size-5 animate-spin" />}
-              {hasReading ? "Set neutral position" : "Reading sensors…"}
-            </button>
-          )}
+
+          {calibrationStep === "aim" ? <>
+            <div className="relative grid h-28 w-44 place-items-center rounded-[2rem] border border-white/10 bg-[#191c18] shadow-[0_18px_55px_rgba(0,0,0,.3)]">
+              <div className="calibration-preview-target grid size-12 place-items-center rounded-full border border-[#b7ff45]/70">
+                <span className="size-2.5 rounded-full bg-[#b7ff45] shadow-[0_0_14px_#b7ff45]" />
+              </div>
+              <Smartphone className="calibration-phone absolute -bottom-4 -right-1 size-12 rotate-[-12deg] text-white" />
+            </div>
+            <span className="phone-eyebrow mt-8">Step 1 of 3</span>
+            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">AIM AT<br />THE DOT.</h1>
+            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Find the small lime dot in the middle of the big screen. Hold your phone like a remote and point its top edge at it.</p>
+            {sensorStatus !== "active" ? (
+              <button type="button" onClick={() => void enableMotionAgain()} className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#7c5cff] font-black text-white shadow-[0_7px_0_#4935a5]"><Move3d className="size-5" /> Enable motion</button>
+            ) : (
+              <button type="button" onClick={beginSteadyCalibration} disabled={!hasReading} className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_7px_0_#789f35] active:translate-y-1 active:shadow-[0_2px_0_#789f35] disabled:opacity-40 disabled:shadow-none">
+                {hasReading ? <CircleDot className="size-5" /> : <LoaderCircle className="size-5 animate-spin" />}
+                {hasReading ? "I’m aiming at the dot" : "Reading sensors…"}
+              </button>
+            )}
+          </> : calibrationStep === "steady" ? <>
+            <div className="grid size-28 place-items-center rounded-full border border-[#b7ff45]/35 bg-[#b7ff45]/10 shadow-[0_0_45px_rgba(183,255,69,.16)]" aria-live="polite">
+              <span className="font-mono text-6xl font-black tabular-nums text-[#b7ff45]">{calibrationCountdown}</span>
+            </div>
+            <span className="phone-eyebrow mt-8">Step 2 of 3</span>
+            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">HOLD<br />STEADY.</h1>
+            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Keep pointing at the dot. Your center position locks automatically when the countdown ends.</p>
+            <div className="mt-7 flex items-center gap-2 rounded-full border border-[#b7ff45]/20 bg-[#b7ff45]/8 px-4 py-2.5 text-sm font-black text-[#b7ff45]"><LoaderCircle className="size-4 animate-spin" /> Locking your center…</div>
+          </> : <>
+            <div className="grid size-28 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-[0_0_45px_rgba(183,255,69,.28)]"><Check className="size-14" strokeWidth={3} /></div>
+            <span className="phone-eyebrow mt-8">Step 3 of 3</span>
+            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">CENTER<br />LOCKED.</h1>
+            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Done. Your cursor will start in the middle of the big screen.</p>
+          </>}
           {(sensorStatus === "denied" || sensorStatus === "unsupported") && <MotionError status={sensorStatus} />}
         </div>
       </PhoneShell>
@@ -448,9 +577,17 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   );
 }
 
+function CalibrationStepPill({ number, label, state }: { number: string; label: string; state: "active" | "complete" | "upcoming" }) {
+  return (
+    <div className={`flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-[11px] font-black uppercase tracking-[.08em] ${state === "active" ? "border-[#b7ff45]/35 bg-[#b7ff45]/12 text-[#b7ff45]" : state === "complete" ? "border-white/10 bg-white/[.055] text-white/65" : "border-white/8 bg-transparent text-white/25"}`}>
+      {state === "complete" ? <Check className="size-3.5" /> : <span className="font-mono">{number}</span>}{label}
+    </div>
+  );
+}
+
 function PhoneShell({ roomCode, status, latencyMs, color, children }: { roomCode: string; status: RoomConnectionStatus; latencyMs: number | null; color?: string; children: React.ReactNode }) {
   return (
-    <main className="phone-shell min-h-dvh overflow-hidden bg-[#10120f] px-4 text-[#f5f5ec]">
+    <main className="phone-shell min-h-dvh overflow-x-hidden bg-[#10120f] px-4 text-[#f5f5ec]">
       <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col">
         <header className="flex h-17 items-center justify-between border-b border-white/[.08]">
           <CursorTagLogo />

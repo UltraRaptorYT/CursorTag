@@ -1,6 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { GAME_CONFIG, PLAYER_COLORS } from "../lib/game/config";
+import {
+  GAME_CONFIG,
+  PLAYER_COLORS,
+  playerColorFromHue,
+} from "../lib/game/config";
 import type {
   ClientRoomMessage,
   CursorPosition,
@@ -18,12 +22,14 @@ type SocketAttachment = {
 type StoredRoom = Omit<RoomSnapshot, "hostConnected"> & {
   aspectRatio: number;
   hostDisconnectExpiresAt: number | null;
+  playerDisconnectExpiresAt: Record<string, number>;
   closed: boolean;
 };
 
 const ROOM_CODE_PATTERN = /^[A-Z0-9]{4,12}$/;
 const MAX_MESSAGE_BYTES = 2_048;
 const HOST_RECONNECT_GRACE_MS = 5_000;
+const PLAYER_RECONNECT_GRACE_MS = 10_000;
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, {
@@ -95,6 +101,7 @@ function defaultRoom(): StoredRoom {
     collisionRadius: GAME_CONFIG.collisionRadius,
     aspectRatio: 16 / 9,
     hostDisconnectExpiresAt: null,
+    playerDisconnectExpiresAt: {},
     closed: false,
   };
 }
@@ -114,11 +121,19 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname.endsWith("/status")) {
+      const state = this.loadState();
+      const hostConnected = this.ctx
+        .getWebSockets("host")
+        .some((socket) => socket.readyState === WebSocket.OPEN);
+      return jsonResponse({ exists: !state.closed && hostConnected });
+    }
+
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return jsonResponse({ error: "Expected a WebSocket upgrade" }, 426);
     }
 
-    const url = new URL(request.url);
     const role = url.searchParams.get("role");
     const clientId = url.searchParams.get("clientId")?.slice(0, 100);
     if ((role !== "host" && role !== "player") || !clientId) {
@@ -219,6 +234,18 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     if (state.closed) return;
 
     if (attachment?.role === "player" && attachment.player) {
+      const replacementConnected = this.ctx
+        .getWebSockets("player")
+        .some((candidate) => {
+          if (candidate.readyState !== WebSocket.OPEN) return false;
+          const candidateAttachment = candidate.deserializeAttachment() as SocketAttachment | null;
+          return (
+            candidateAttachment?.clientId === attachment.clientId &&
+            Boolean(candidateAttachment.player)
+          );
+        });
+      if (replacementConnected) return;
+
       const storedPlayer = state.players.find(
         (player) => player.id === attachment.player?.id,
       );
@@ -232,6 +259,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       state.players = this.mergePlayers(state).map((player) =>
         player.id === disconnected.id ? disconnected : player,
       );
+      state.playerDisconnectExpiresAt[disconnected.id] =
+        Date.now() + PLAYER_RECONNECT_GRACE_MS;
 
       if (state.phase === "playing" && state.itPlayerId === disconnected.id) {
         this.assignReplacementIt(state, disconnected.id);
@@ -266,6 +295,24 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     if (hostConnected && state.hostDisconnectExpiresAt) {
       state.hostDisconnectExpiresAt = null;
       this.saveState(state);
+    }
+    const players = this.mergePlayers(state);
+    const expiredPlayerIds = Object.entries(state.playerDisconnectExpiresAt)
+      .filter(([, expiresAt]) => now + 25 >= expiresAt)
+      .map(([playerId]) => playerId);
+    if (expiredPlayerIds.length) {
+      const expired = new Set(expiredPlayerIds);
+      const connectedIds = new Set(
+        players.filter((player) => player.connected).map((player) => player.id),
+      );
+      state.players = players.filter(
+        (player) => !expired.has(player.id) || connectedIds.has(player.id),
+      );
+      for (const playerId of expiredPlayerIds) {
+        delete state.playerDisconnectExpiresAt[playerId];
+      }
+      this.saveState(state);
+      this.broadcastSnapshot(state);
     }
     if (
       state.phase === "playing" &&
@@ -357,6 +404,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         lives: GAME_CONFIG.startingLives,
         eliminated: false,
       }));
+      next.playerDisconnectExpiresAt = { ...state.playerDisconnectExpiresAt };
       next.aspectRatio = state.aspectRatio;
       this.saveState(next);
       await this.scheduleNextAlarm(next);
@@ -388,7 +436,11 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       }
 
       const usedColors = new Set(currentPlayers.map((player) => player.color));
+      const requestedColor = Number.isFinite(message.payload.hue)
+        ? playerColorFromHue(message.payload.hue as number)
+        : null;
       const color =
+        requestedColor ??
         existing?.color ??
         PLAYER_COLORS.find((candidate) => !usedColors.has(candidate)) ??
         PLAYER_COLORS[currentPlayers.length % PLAYER_COLORS.length];
@@ -397,7 +449,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         name: cleanName,
         color,
         connected: true,
-        calibrated: existing?.calibrated ?? false,
+        calibrated: message.payload.calibrated ?? existing?.calibrated ?? false,
         position: existing?.position ?? {
           x: 0.3 + (currentPlayers.length % 4) * 0.13,
           y: 0.4 + Math.floor(currentPlayers.length / 4) * 0.2,
@@ -406,6 +458,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         lives: existing?.lives ?? GAME_CONFIG.startingLives,
         eliminated: existing?.eliminated ?? false,
       };
+      delete state.playerDisconnectExpiresAt[player.id];
       socket.serializeAttachment({ ...attachment, player });
       state.players = currentPlayers.some((candidate) => candidate.id === player.id)
         ? currentPlayers.map((candidate) => (candidate.id === player.id ? player : candidate))
@@ -671,6 +724,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     const deadlines = [
       state.hostDisconnectExpiresAt,
       state.phase === "playing" ? state.roundEndsAt : null,
+      ...Object.values(state.playerDisconnectExpiresAt),
     ].filter((deadline): deadline is number => typeof deadline === "number");
     if (!deadlines.length) {
       await this.ctx.storage.deleteAlarm();
@@ -713,6 +767,11 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
               ? player.eliminated
               : false,
         })),
+        playerDisconnectExpiresAt:
+          parsed.playerDisconnectExpiresAt &&
+          typeof parsed.playerDisconnectExpiresAt === "object"
+            ? parsed.playerDisconnectExpiresAt
+            : {},
         maxPlayers: this.maxPlayers(),
         maxLives: GAME_CONFIG.startingLives,
         maxRounds: GAME_CONFIG.maxRounds,
@@ -803,14 +862,27 @@ function isOriginAllowed(request: Request, configuredOrigins?: string) {
     .includes(origin);
 }
 
+function withCors(response: Response, request: Request) {
+  const headers = new Headers(response.headers);
+  headers.set("access-control-allow-origin", request.headers.get("origin") ?? "*");
+  headers.set("access-control-allow-methods", "GET, OPTIONS");
+  headers.set("vary", "Origin");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
+    const isStatusRequest = url.pathname.endsWith("/status");
     if (url.pathname === "/health") {
       return jsonResponse({ ok: true, service: "cursor-tag-realtime" });
     }
 
-    const match = url.pathname.match(/^\/rooms\/([^/]+)$/);
+    const match = url.pathname.match(/^\/rooms\/([^/]+)(?:\/status)?$/);
     const roomCode = match?.[1]?.toUpperCase();
     if (!roomCode || !ROOM_CODE_PATTERN.test(roomCode)) {
       return jsonResponse({ error: "Invalid room code" }, 404);
@@ -822,7 +894,12 @@ export default {
       return jsonResponse({ error: "Origin not allowed" }, 403);
     }
 
+    if (request.method === "OPTIONS") {
+      return withCors(new Response(null, { status: 204 }), request);
+    }
+
     const room = env.ROOMS.getByName(roomCode);
-    return room.fetch(request);
+    const response = await room.fetch(request);
+    return isStatusRequest ? withCors(response, request) : response;
   },
 } satisfies ExportedHandler<Cloudflare.Env>;

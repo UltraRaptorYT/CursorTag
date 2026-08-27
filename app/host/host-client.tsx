@@ -196,6 +196,7 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
   }
 
   const eligiblePlayers = snapshot.players.filter((player) => player.connected && player.calibrated);
+  const calibratingPlayers = snapshot.players.filter((player) => player.connected && !player.calibrated);
   const canStart = eligiblePlayers.length >= GAME_CONFIG.minPlayers && status === "connected";
 
   return (
@@ -214,7 +215,7 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
               GET YOUR<br />CURSORS IN.
             </h1>
             <p className="mt-5 max-w-lg text-lg leading-relaxed text-white/48">
-              Scan with each phone, pick a name, then hold still to calibrate. The code disappears when the chase begins.
+              Scan with each phone, pick a name and hue, then point the phone at the center target to calibrate.
             </p>
 
             <div className="mt-8 flex flex-col gap-5 sm:flex-row sm:items-center">
@@ -254,8 +255,22 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
           </div>
         </section>
       </div>
+      {calibratingPlayers.length > 0 && <CalibrationTarget />}
       {notice && <Toast message={notice} />}
     </main>
+  );
+}
+
+function CalibrationTarget() {
+  return (
+    <div className="calibration-target pointer-events-none fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 text-center" role="status" aria-label="Calibration target at the center of the screen">
+      <div className="relative mx-auto grid size-12 place-items-center rounded-full border border-[#b7ff45]/65 bg-[#10120f]/75 shadow-[0_0_22px_rgba(183,255,69,.25)] backdrop-blur-sm">
+        <span className="absolute h-px w-16 bg-[#b7ff45]/35" />
+        <span className="absolute h-16 w-px bg-[#b7ff45]/35" />
+        <span className="size-2.5 rounded-full bg-[#b7ff45] shadow-[0_0_10px_#b7ff45]" />
+      </div>
+      <span className="mt-2 block text-[9px] font-black uppercase tracking-[.16em] text-[#b7ff45]/55">Center</span>
+    </div>
   );
 }
 
@@ -336,7 +351,7 @@ function LobbyPlayer({ player }: { player: RoomPlayer }) {
   return (
     <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${player.connected ? "border-white/8 bg-black/15" : "border-white/5 bg-black/10 opacity-45"}`}>
       <span className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-black text-[#10120f]" style={{ backgroundColor: player.color }}>{player.name.charAt(0).toUpperCase()}</span>
-      <div className="min-w-0 flex-1"><p className="truncate font-black">{player.name}</p><p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-bold text-white/35">{!player.connected ? <><WifiOff className="size-3" /> Disconnected</> : player.calibrated ? <><Check className="size-3 text-[#b7ff45]" /> Ready · {player.lives} lives</> : <><LoaderCircle className="size-3 animate-spin" /> Calibrating</>}</p></div>
+      <div className="min-w-0 flex-1"><p className="truncate font-black">{player.name}</p><p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-bold text-white/35">{!player.connected ? <><WifiOff className="size-3" /> Reconnecting · removes in 10s</> : player.calibrated ? <><Check className="size-3 text-[#b7ff45]" /> Ready · {player.lives} lives</> : <><LoaderCircle className="size-3 animate-spin" /> Calibrating</>}</p></div>
     </div>
   );
 }

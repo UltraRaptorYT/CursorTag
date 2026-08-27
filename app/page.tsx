@@ -3,19 +3,35 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { ArrowRight, Gamepad2, MonitorUp, Radio, Star, Zap } from "lucide-react";
+import { ArrowRight, CircleAlert, Gamepad2, LoaderCircle, MonitorUp, Radio, Star, Zap } from "lucide-react";
 
 import { CursorTagLogo } from "@/components/cursor-tag-logo";
 import { sanitizeRoomCode } from "@/lib/game/config";
+import { checkRoomExists } from "@/lib/realtime/room";
 
 export default function HomePage() {
   const router = useRouter();
   const [roomCode, setRoomCode] = useState("");
+  const [checkingRoom, setCheckingRoom] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
-  function joinRoom(event: FormEvent) {
+  async function joinRoom(event: FormEvent) {
     event.preventDefault();
     const code = sanitizeRoomCode(roomCode);
-    if (code.length >= 4) router.push(`/room/${code}`);
+    if (code.length < 4 || checkingRoom) return;
+    setCheckingRoom(true);
+    setJoinError(null);
+    try {
+      if (!(await checkRoomExists(code))) {
+        setJoinError("That room doesn’t exist. Check the code or ask the host to open it.");
+        return;
+      }
+      router.push(`/room/${code}`);
+    } catch {
+      setJoinError("Couldn’t reach the game server. Try again in a moment.");
+    } finally {
+      setCheckingRoom(false);
+    }
   }
 
   return (
@@ -46,12 +62,15 @@ export default function HomePage() {
                 <MonitorUp className="size-5" /> Host a game
                 <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
               </Link>
-              <form onSubmit={joinRoom} className="flex h-15 overflow-hidden rounded-2xl border border-white/14 bg-white/[.06] focus-within:border-[#7c5cff] focus-within:ring-4 focus-within:ring-[#7c5cff]/15">
-                <input value={roomCode} onChange={(event) => setRoomCode(sanitizeRoomCode(event.target.value))} placeholder="ROOM CODE" aria-label="Room code" autoCapitalize="characters" maxLength={6} className="min-w-0 flex-1 bg-transparent px-5 font-mono text-base font-black uppercase tracking-[.18em] outline-none placeholder:text-white/25" />
-                <button type="submit" aria-label="Join room" disabled={roomCode.length < 4} className="grid w-15 place-items-center bg-white/10 text-white transition hover:bg-[#7c5cff] disabled:opacity-25">
-                  <ArrowRight className="size-5" />
-                </button>
-              </form>
+              <div className="min-w-0 sm:w-80">
+                <form onSubmit={(event) => void joinRoom(event)} className="flex h-15 overflow-hidden rounded-2xl border border-white/14 bg-white/[.06] focus-within:border-[#7c5cff] focus-within:ring-4 focus-within:ring-[#7c5cff]/15">
+                  <input value={roomCode} onChange={(event) => { setRoomCode(sanitizeRoomCode(event.target.value)); setJoinError(null); }} placeholder="ROOM CODE" aria-label="Room code" autoCapitalize="characters" maxLength={6} className="min-w-0 flex-1 bg-transparent px-5 font-mono text-base font-black uppercase tracking-[.18em] outline-none placeholder:text-white/25" />
+                  <button type="submit" aria-label="Join room" disabled={roomCode.length < 4 || checkingRoom} className="grid w-15 place-items-center bg-white/10 text-white transition hover:bg-[#7c5cff] disabled:opacity-25">
+                    {checkingRoom ? <LoaderCircle className="size-5 animate-spin" /> : <ArrowRight className="size-5" />}
+                  </button>
+                </form>
+                {joinError && <p className="mt-3 flex items-start gap-2 text-sm font-bold leading-snug text-[#ff9292]" role="alert"><CircleAlert className="mt-0.5 size-4 shrink-0" />{joinError}</p>}
+              </div>
             </div>
           </div>
 

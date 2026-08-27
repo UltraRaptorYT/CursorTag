@@ -46,7 +46,7 @@ export type RoomSnapshot = {
 };
 
 export type ClientRoomMessage =
-  | { type: "join"; payload: { name: string } }
+  | { type: "join"; payload: { name: string; hue?: number; calibrated?: boolean } }
   | { type: "calibrated" }
   | {
       type: "cursor";
