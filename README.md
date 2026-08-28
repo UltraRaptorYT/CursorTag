@@ -8,9 +8,9 @@ Cursor Tag is a disposable, browser-based multiplayer party game. Players join f
 - The chaser scores `+1` by colliding with another cursor. Both cursors freeze for 300 ms, the tagged player becomes it, and receives a 1.5-second shield against an instant re-tag.
 - If time expires, every connected runner scores `+1` for surviving. Nobody is eliminated, so everyone plays the full game.
 - Calibrated phones can move immediately in the warm-up arena before the host starts the round.
-- Each round spawns two power-ups: 5-second Turbo movement, a 5-second Slow Field against rivals, a 1-second rival freeze, or a `+2` point bonus. Turbo makes movement faster and more responsive; Slow Field gives rivals a heavy movement drag. Legacy shield pickups protect runners, but become Turbo when collected by the chaser.
-- The randomized timer gets faster every round: it begins at 15–30 seconds and tightens to a 7–12 second endgame.
-- After 10 rounds, the player with the most points wins.
+- Power-ups spawn one at a time at random moments during play: 5-second Turbo movement, a 5-second Slow Field against rivals, a 1-second rival freeze, or a `+2` point bonus. The host can choose Off, Normal (every 3–6 seconds, up to 3 on screen), or Chaos (every 1.5–3 seconds, up to 5). Turbo makes movement faster and more responsive; Slow Field gives rivals a heavy movement drag.
+- Before starting, the host chooses 5, 10, or 15 rounds and a fixed 10, 15, or 20-second round timer.
+- After the selected number of rounds, the player with the most points wins.
 - Disconnected cursors get a 10-second reconnect grace period, then leave the room automatically. A disconnected chaser is released immediately so the game cannot get stuck.
 - Rooms support 2–8 players by default. Change `MAX_PLAYERS` in `cloudflare/wrangler.jsonc` to use a different cap (2–16).
 

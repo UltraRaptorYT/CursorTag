@@ -7,6 +7,7 @@ export type CursorPosition = {
 
 export type PowerUpType = "shield" | "boost" | "slow" | "freeze" | "bonus";
 export type MovementModifier = "boost" | "slow";
+export type PowerUpMode = "off" | "normal" | "chaos";
 
 export type ArenaPowerUp = CursorPosition & {
   id: string;
@@ -59,9 +60,11 @@ export type RoomSnapshot = {
   impact: Impact | null;
   powerUps: ArenaPowerUp[];
   powerUpEvent: PowerUpEvent | null;
+  powerUpMode: PowerUpMode;
   maxPlayers: number;
   maxLives: number;
   maxRounds: number;
+  roundSeconds: number;
   collisionRadius: number;
 };
 
@@ -76,6 +79,12 @@ export function normalizeRoomSnapshot(snapshot: RoomSnapshot): RoomSnapshot {
     })),
     powerUps: Array.isArray(snapshot.powerUps) ? snapshot.powerUps : [],
     powerUpEvent: snapshot.powerUpEvent ?? null,
+    powerUpMode:
+      snapshot.powerUpMode === "off" || snapshot.powerUpMode === "chaos"
+        ? snapshot.powerUpMode
+        : "normal",
+    roundSeconds:
+      typeof snapshot.roundSeconds === "number" ? snapshot.roundSeconds : 15,
   };
 }
 
@@ -87,6 +96,14 @@ export type ClientRoomMessage =
       payload: CursorPosition & { sequence: number; clientSentAt: number };
     }
   | { type: "host-start"; payload: { aspectRatio: number } }
+  | {
+      type: "host-settings";
+      payload: {
+        powerUpMode?: PowerUpMode;
+        maxRounds?: number;
+        roundSeconds?: number;
+      };
+    }
   | { type: "host-viewport"; payload: { aspectRatio: number } }
   | { type: "host-end" }
   | { type: "host-reset" }

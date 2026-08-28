@@ -74,6 +74,19 @@ try {
     5_000,
     "two calibrated players",
   );
+  host.send({
+    type: "host-settings",
+    payload: { powerUpMode: "chaos", maxRounds: 5, roundSeconds: 10 },
+  });
+  await host.waitFor(
+    (message) =>
+      message.type === "snapshot" &&
+      message.payload.powerUpMode === "chaos" &&
+      message.payload.maxRounds === 5 &&
+      message.payload.roundSeconds === 10,
+    5_000,
+    "chaos room setting",
+  );
   host.send({ type: "host-start", payload: { aspectRatio: 16 / 9 } });
   const started = await host.waitFor(
     (message) => message.type === "snapshot" && message.payload.phase === "playing",
@@ -83,9 +96,20 @@ try {
   if (started.type !== "snapshot" || !started.payload.itPlayerId) {
     throw new Error("Game did not assign an it player");
   }
-  if (started.payload.players.some((player) => player.lives !== 3)) {
-    throw new Error("Players did not start with three lives");
+  if (started.payload.players.some((player) => player.eliminated)) {
+    throw new Error("Players should not be eliminated in the points-only game");
   }
+  if (started.payload.powerUps.length !== 0) {
+    throw new Error("Power-ups should spawn during play, not at round start");
+  }
+  await host.waitFor(
+    (message) =>
+      message.type === "snapshot" &&
+      message.payload.phase === "playing" &&
+      message.payload.powerUps.length > 0,
+    4_000,
+    "random in-round power-up spawn",
+  );
 
   const itId = started.payload.itPlayerId;
   const target = started.payload.players.find((player) => player.id !== itId);
@@ -121,9 +145,10 @@ try {
   if (
     !started.payload.roundDurationMs ||
     !tagged.payload.roundDurationMs ||
-    tagged.payload.roundDurationMs >= started.payload.roundDurationMs
+    started.payload.roundDurationMs !== 10_000 ||
+    tagged.payload.roundDurationMs !== 10_000
   ) {
-    throw new Error("The next round did not become faster");
+    throw new Error("The host-selected round time was not preserved");
   }
   if (
     !tagged.payload.roundEndsAt ||

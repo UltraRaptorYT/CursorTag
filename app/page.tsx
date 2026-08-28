@@ -74,7 +74,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="relative mx-auto aspect-[4/5] w-full max-w-[520px] lg:max-w-none">
+          <div className="relative mx-auto aspect-[11/12] w-full max-w-[520px] lg:max-w-none">
             <div className="absolute inset-[6%] rotate-3 rounded-[3rem] bg-[#7c5cff] shadow-[22px_28px_0_rgba(0,0,0,.24)]" />
             <div className="absolute inset-[3%_8%_9%_2%] -rotate-2 overflow-hidden rounded-[2.75rem] border border-white/10 bg-[#191c18] p-5 shadow-2xl sm:p-7">
               <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-[.2em] text-white/40">

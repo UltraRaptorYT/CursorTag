@@ -25,6 +25,7 @@ import { CursorTagLogo } from "@/components/cursor-tag-logo";
 import {
   DEFAULT_PLAYER_HUE,
   GAME_CONFIG,
+  LEGACY_STARTING_LIVES,
   POWER_UP_CONFIG,
   normalizePlayerHue,
   playerColorFromHue,
@@ -59,9 +60,11 @@ function emptySnapshot(): RoomSnapshot {
     impact: null,
     powerUps: [],
     powerUpEvent: null,
+    powerUpMode: "normal",
     maxPlayers: GAME_CONFIG.maxPlayers,
-    maxLives: GAME_CONFIG.startingLives,
-    maxRounds: GAME_CONFIG.maxRounds,
+    maxLives: LEGACY_STARTING_LIVES,
+    maxRounds: GAME_CONFIG.defaultRounds,
+    roundSeconds: GAME_CONFIG.defaultRoundSeconds,
     collisionRadius: GAME_CONFIG.collisionRadius,
   };
 }
@@ -460,6 +463,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <span className="phone-eyebrow">Room {roomCode}</span>
           <h1 className="mt-4 text-[2.7rem] font-black leading-[.92] tracking-[-.06em] sm:text-5xl">PICK A NAME.<br /><span style={{ color: selectedColor }}>PICK YOUR COLOR.</span></h1>
           <p className="mt-4 text-sm leading-relaxed text-white/50 sm:text-base">This color is your cursor on the big screen. Drag the hue until it feels unmistakably yours.</p>
+          <SharedGameSettings snapshot={snapshot} />
           <form onSubmit={joinRoom} className="mt-6 rounded-[1.75rem] border border-white/10 bg-[#191c18] p-5 shadow-[0_20px_70px_rgba(0,0,0,.35)]">
             <label htmlFor="nickname" className="text-sm font-black">Your name</label>
             <div className="mt-2 flex h-14 items-center rounded-2xl border border-white/8 bg-white/[.055] px-4 focus-within:ring-4 focus-within:ring-[#7c5cff]/20">
@@ -571,6 +575,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <span className="phone-eyebrow mt-7">Calibrated & ready</span>
           <h1 className="mt-3 text-4xl font-black tracking-[-.05em]">YOU’RE IN, {nickname.toUpperCase()}.</h1>
           <p className="mt-4 max-w-xs text-white/50">Move your phone now—your cursor is already live in the warm-up arena on the big screen.</p>
+          <SharedGameSettings snapshot={snapshot} />
           <div className="mt-7 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm"><Move3d className="size-4 text-[#9b87ff]" /> Warm up while others join</div>
         </div>
       </PhoneShell>
@@ -596,6 +601,28 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         <button type="button" onClick={recalibrateImmediately} disabled={!hasReading} className={`mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/55"}`}><RotateCcw className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`} /> {neutralReset ? "Neutral reset" : "Recalibrate instantly"}</button>
       </div>
     </PhoneShell>
+  );
+}
+
+function SharedGameSettings({ snapshot }: { snapshot: RoomSnapshot }) {
+  return (
+    <div className="mt-5 w-full max-w-sm rounded-2xl border border-white/10 bg-white/[.045] p-3 text-left" aria-label="Game settings">
+      <p className="text-[10px] font-black uppercase tracking-[.14em] text-[#b7ff45]">Game settings</p>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <SettingValue label="Rounds" value={String(snapshot.maxRounds)} />
+        <SettingValue label="Round time" value={`${snapshot.roundSeconds}s`} />
+        <SettingValue label="Power-ups" value={snapshot.powerUpMode} />
+      </div>
+    </div>
+  );
+}
+
+function SettingValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-black/20 px-2.5 py-2">
+      <p className="text-[9px] font-black uppercase tracking-[.08em] text-white/30">{label}</p>
+      <p className="mt-0.5 truncate text-xs font-black capitalize text-white/75">{value}</p>
+    </div>
   );
 }
 

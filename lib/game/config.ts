@@ -4,19 +4,16 @@ export const GAME_CONFIG = {
   collisionRadius: 0.058,
   freezeMs: 300,
   tagImmunityMs: 1_500,
-  startingLives: 3,
-  maxRounds: 10,
-  minRoundSeconds: 10,
-  maxRoundSeconds: 20,
-  fastestMinRoundSeconds: 7,
-  fastestMaxRoundSeconds: 12,
-  minRoundDecayPerRound: 0.75,
-  maxRoundDecayPerRound: 1.5,
-  minimumRoundDecreaseMs: 500,
+  defaultRounds: 10,
+  roundOptions: [5, 10, 15],
+  defaultRoundSeconds: 15,
+  roundSecondsOptions: [10, 15, 20],
 } as const;
 
+// Kept only for backwards compatibility with older saved room snapshots.
+export const LEGACY_STARTING_LIVES = 3;
+
 export const POWER_UP_CONFIG = {
-  onField: 2,
   pickupRadius: 0.045,
   shieldMs: 4_000,
   boostMs: 5_000,
@@ -27,6 +24,10 @@ export const POWER_UP_CONFIG = {
   slowSmoothing: 0.1,
   freezeMs: 1_000,
   bonusPoints: 2,
+  modes: {
+    normal: { minSpawnDelayMs: 3_000, maxSpawnDelayMs: 6_000, maxOnField: 3 },
+    chaos: { minSpawnDelayMs: 1_500, maxSpawnDelayMs: 3_000, maxOnField: 5 },
+  },
 } as const;
 
 export const PLAYER_COLORS = [

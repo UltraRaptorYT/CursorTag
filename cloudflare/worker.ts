@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import {
   GAME_CONFIG,
+  LEGACY_STARTING_LIVES,
   POWER_UP_CONFIG,
   PLAYER_COLORS,
   playerColorFromHue,
@@ -9,6 +10,7 @@ import {
 import type {
   ClientRoomMessage,
   CursorPosition,
+  PowerUpMode,
   PowerUpType,
   RoomPlayer,
   RoomSnapshot,
@@ -25,6 +27,7 @@ type StoredRoom = Omit<RoomSnapshot, "hostConnected"> & {
   aspectRatio: number;
   hostDisconnectExpiresAt: number | null;
   playerDisconnectExpiresAt: Record<string, number>;
+  nextPowerUpAt: number | null;
   closed: boolean;
 };
 
@@ -55,42 +58,33 @@ function randomUnit() {
   return bytes[0] / 2 ** 32;
 }
 
-function spawnPowerUps() {
+function spawnPowerUp() {
   const types: PowerUpType[] = ["boost", "slow", "freeze", "bonus"];
-  return Array.from({ length: POWER_UP_CONFIG.onField }, (_, index) => ({
+  return {
     id: crypto.randomUUID(),
     type: types[randomIndex(types.length)],
     x: 0.16 + randomUnit() * 0.68,
-    y: 0.25 + ((randomUnit() + index * 0.41) % 1) * 0.58,
-  }));
+    y: 0.25 + randomUnit() * 0.58,
+  };
 }
 
-function randomRoundDurationMs(round: number, previousDurationMs?: number | null) {
-  const completedRounds = Math.max(0, round - 1);
-  const minimum = Math.max(
-    GAME_CONFIG.fastestMinRoundSeconds,
-    GAME_CONFIG.minRoundSeconds -
-      completedRounds * GAME_CONFIG.minRoundDecayPerRound,
+function powerUpModeConfig(mode: PowerUpMode) {
+  if (mode === "normal") return POWER_UP_CONFIG.modes.normal;
+  if (mode === "chaos") return POWER_UP_CONFIG.modes.chaos;
+  return null;
+}
+
+function nextPowerUpSpawnAt(mode: PowerUpMode, now = Date.now()) {
+  const config = powerUpModeConfig(mode);
+  if (!config) return null;
+  return now + Math.round(
+    config.minSpawnDelayMs +
+      randomUnit() * (config.maxSpawnDelayMs - config.minSpawnDelayMs),
   );
-  const maximum = Math.max(
-    GAME_CONFIG.fastestMaxRoundSeconds,
-    GAME_CONFIG.maxRoundSeconds -
-      completedRounds * GAME_CONFIG.maxRoundDecayPerRound,
-  );
-  const bytes = new Uint32Array(1);
-  crypto.getRandomValues(bytes);
-  const random = bytes[0] / 2 ** 32;
-  const randomizedDuration = Math.round(
-    (minimum + random * (maximum - minimum)) * 1_000,
-  );
-  if (!previousDurationMs) return randomizedDuration;
-  return Math.max(
-    GAME_CONFIG.fastestMinRoundSeconds * 1_000,
-    Math.min(
-      randomizedDuration,
-      previousDurationMs - GAME_CONFIG.minimumRoundDecreaseMs,
-    ),
-  );
+}
+
+function roundDurationMs(roundSeconds: number) {
+  return roundSeconds * 1_000;
 }
 
 function clampPosition(position: CursorPosition): CursorPosition {
@@ -115,13 +109,16 @@ function defaultRoom(): StoredRoom {
     impact: null,
     powerUps: [],
     powerUpEvent: null,
+    powerUpMode: "normal",
     maxPlayers: GAME_CONFIG.maxPlayers,
-    maxLives: GAME_CONFIG.startingLives,
-    maxRounds: GAME_CONFIG.maxRounds,
+    maxLives: LEGACY_STARTING_LIVES,
+    maxRounds: GAME_CONFIG.defaultRounds,
+    roundSeconds: GAME_CONFIG.defaultRoundSeconds,
     collisionRadius: GAME_CONFIG.collisionRadius,
     aspectRatio: 16 / 9,
     hostDisconnectExpiresAt: null,
     playerDisconnectExpiresAt: {},
+    nextPowerUpAt: null,
     closed: false,
   };
 }
@@ -344,6 +341,21 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       await this.handleTimeout(state);
       return;
     }
+    if (
+      state.phase === "playing" &&
+      state.itPlayerId &&
+      state.roundEndsAt &&
+      state.nextPowerUpAt &&
+      now + 25 >= state.nextPowerUpAt
+    ) {
+      const config = powerUpModeConfig(state.powerUpMode);
+      if (config && state.powerUps.length < config.maxOnField) {
+        state.powerUps = [...state.powerUps, spawnPowerUp()];
+      }
+      state.nextPowerUpAt = nextPowerUpSpawnAt(state.powerUpMode, now);
+      this.saveState(state);
+      this.broadcastSnapshot(state);
+    }
     await this.scheduleNextAlarm(state);
   }
 
@@ -364,6 +376,28 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       return;
     }
 
+    if (message.type === "host-settings") {
+      if (state.phase !== "lobby") return;
+      const { powerUpMode, maxRounds, roundSeconds } = message.payload;
+      if (powerUpMode !== undefined) {
+        if (powerUpMode !== "off" && powerUpMode !== "normal" && powerUpMode !== "chaos") return;
+        state.powerUpMode = powerUpMode;
+        state.powerUps = [];
+        state.nextPowerUpAt = null;
+      }
+      if (maxRounds !== undefined) {
+        if (!GAME_CONFIG.roundOptions.some((option) => option === maxRounds)) return;
+        state.maxRounds = maxRounds;
+      }
+      if (roundSeconds !== undefined) {
+        if (!GAME_CONFIG.roundSecondsOptions.some((option) => option === roundSeconds)) return;
+        state.roundSeconds = roundSeconds;
+      }
+      this.saveState(state);
+      this.broadcastSnapshot(state);
+      return;
+    }
+
     if (message.type === "host-start") {
       const eligible = this.mergePlayers(state).filter(
         (player) => player.connected && player.calibrated && !player.eliminated,
@@ -376,13 +410,13 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         return;
       }
 
-      const duration = randomRoundDurationMs(1);
+      const duration = roundDurationMs(state.roundSeconds);
       const now = Date.now();
       state.phase = "playing";
       state.players = this.mergePlayers(state).map((player) => ({
         ...player,
         score: 0,
-        lives: GAME_CONFIG.startingLives,
+        lives: LEGACY_STARTING_LIVES,
         eliminated: false,
         shieldUntil: null,
         movementModifier: null,
@@ -397,8 +431,9 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       state.protectedPlayerId = state.itPlayerId;
       state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
       state.impact = null;
-      state.powerUps = spawnPowerUps();
+      state.powerUps = [];
       state.powerUpEvent = null;
+      state.nextPowerUpAt = nextPowerUpSpawnAt(state.powerUpMode, now);
       state.aspectRatio = Math.max(
         0.5,
         Math.min(3, Number(message.payload.aspectRatio) || 16 / 9),
@@ -410,13 +445,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     }
 
     if (message.type === "host-end") {
-      state.phase = "finished";
-      state.roundEndsAt = null;
-      state.roundDurationMs = null;
-      state.freezeUntil = null;
-      state.frozenPlayerIds = [];
-      state.protectedPlayerId = null;
-      state.invulnerableUntil = null;
+      this.finishGame(state);
       this.saveState(state);
       await this.scheduleNextAlarm(state);
       this.broadcastSnapshot(state);
@@ -428,7 +457,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       next.players = this.mergePlayers(state).map((player) => ({
         ...player,
         score: 0,
-        lives: GAME_CONFIG.startingLives,
+        lives: LEGACY_STARTING_LIVES,
         eliminated: false,
         shieldUntil: null,
         movementModifier: null,
@@ -436,6 +465,9 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       }));
       next.playerDisconnectExpiresAt = { ...state.playerDisconnectExpiresAt };
       next.aspectRatio = state.aspectRatio;
+      next.powerUpMode = state.powerUpMode;
+      next.maxRounds = state.maxRounds;
+      next.roundSeconds = state.roundSeconds;
       this.saveState(next);
       await this.scheduleNextAlarm(next);
       this.broadcastSnapshot(next);
@@ -485,7 +517,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
           y: 0.4 + Math.floor(currentPlayers.length / 4) * 0.2,
         },
         score: existing?.score ?? 0,
-        lives: existing?.lives ?? GAME_CONFIG.startingLives,
+        lives: existing?.lives ?? LEGACY_STARTING_LIVES,
         eliminated: false,
         shieldUntil: existing?.shieldUntil ?? null,
         movementModifier: existing?.movementModifier ?? null,
@@ -664,7 +696,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     state.players = players.map((player) =>
       player.id === itPlayer.id ? { ...player, score: player.score + 1 } : player,
     );
-    if (state.round >= GAME_CONFIG.maxRounds) {
+    if (state.round >= state.maxRounds) {
       this.finishGame(state);
       this.saveState(state);
       await this.scheduleNextAlarm(state);
@@ -673,10 +705,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     }
 
     state.round += 1;
-    const duration = randomRoundDurationMs(
-      state.round,
-      state.roundDurationMs,
-    );
+    const duration = roundDurationMs(state.roundSeconds);
     state.itPlayerId = taggedPlayer.id;
     state.roundDurationMs = duration;
     state.roundEndsAt = now + duration;
@@ -692,7 +721,6 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       fromPlayerId: itPlayer.id,
       toPlayerId: taggedPlayer.id,
     };
-    state.powerUps = spawnPowerUps();
     state.powerUpEvent = null;
     this.saveState(state);
     await this.scheduleNextAlarm(state);
@@ -712,10 +740,9 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     state.protectedPlayerId = null;
     state.invulnerableUntil = null;
     state.impact = null;
-    state.powerUps = [];
     state.powerUpEvent = null;
 
-    if (state.round >= GAME_CONFIG.maxRounds) {
+    if (state.round >= state.maxRounds) {
       this.finishGame(state);
       this.saveState(state);
       await this.scheduleNextAlarm(state);
@@ -737,20 +764,18 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       state.itPlayerId = null;
       state.roundEndsAt = null;
       state.roundDurationMs = null;
+      state.nextPowerUpAt = null;
     } else {
       const alternatives = eligible.filter((player) => player.id !== timedOutPlayerId);
       const pool = alternatives.length ? alternatives : eligible;
-      const duration = randomRoundDurationMs(
-        state.round,
-        state.roundDurationMs,
-      );
+      const duration = roundDurationMs(state.roundSeconds);
       const now = Date.now();
       state.itPlayerId = pool[randomIndex(pool.length)].id;
       state.roundDurationMs = duration;
       state.roundEndsAt = now + duration;
       state.protectedPlayerId = state.itPlayerId;
       state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
-      state.powerUps = spawnPowerUps();
+      state.nextPowerUpAt ??= nextPowerUpSpawnAt(state.powerUpMode, now);
     }
 
     this.saveState(state);
@@ -769,19 +794,17 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       state.itPlayerId = null;
       state.roundEndsAt = null;
       state.roundDurationMs = null;
+      state.nextPowerUpAt = null;
       return;
     }
     state.round += 1;
-    if (state.round > GAME_CONFIG.maxRounds) {
+    if (state.round > state.maxRounds) {
       this.finishGame(state);
       return;
     }
     const candidates = active.filter((player) => player.id !== excludedId);
     const pool = candidates.length ? candidates : active;
-    const duration = randomRoundDurationMs(
-      state.round,
-      state.roundDurationMs,
-    );
+    const duration = roundDurationMs(state.roundSeconds);
     const now = Date.now();
     state.itPlayerId = pool[randomIndex(pool.length)].id;
     state.roundDurationMs = duration;
@@ -790,7 +813,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     state.frozenPlayerIds = [];
     state.protectedPlayerId = state.itPlayerId;
     state.invulnerableUntil = now + GAME_CONFIG.tagImmunityMs;
-    state.powerUps = spawnPowerUps();
+    state.nextPowerUpAt ??= nextPowerUpSpawnAt(state.powerUpMode, now);
     state.powerUpEvent = null;
   }
 
@@ -805,6 +828,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     state.invulnerableUntil = null;
     state.powerUps = [];
     state.powerUpEvent = null;
+    state.nextPowerUpAt = null;
   }
 
   private async closeRoom(state: StoredRoom) {
@@ -826,6 +850,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     const deadlines = [
       state.hostDisconnectExpiresAt,
       state.phase === "playing" ? state.roundEndsAt : null,
+      state.phase === "playing" && state.roundEndsAt ? state.nextPowerUpAt : null,
       ...Object.values(state.playerDisconnectExpiresAt),
     ].filter((deadline): deadline is number => typeof deadline === "number");
     if (!deadlines.length) {
@@ -864,6 +889,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     }
     try {
       const parsed = JSON.parse(row.json) as Partial<StoredRoom>;
+      const savedMaxRounds = Number(parsed.maxRounds);
+      const savedRoundSeconds = Number(parsed.roundSeconds);
       const restored: StoredRoom = {
         ...defaultRoom(),
         ...parsed,
@@ -872,7 +899,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
           lives:
             typeof player.lives === "number"
               ? player.lives
-              : GAME_CONFIG.startingLives,
+              : LEGACY_STARTING_LIVES,
           eliminated: false,
           shieldUntil:
             typeof player.shieldUntil === "number" ? player.shieldUntil : null,
@@ -890,15 +917,36 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
           typeof parsed.playerDisconnectExpiresAt === "object"
             ? parsed.playerDisconnectExpiresAt
             : {},
+        powerUpMode:
+          parsed.powerUpMode === "off" || parsed.powerUpMode === "chaos"
+            ? parsed.powerUpMode
+            : "normal",
+        nextPowerUpAt:
+          typeof parsed.nextPowerUpAt === "number" ? parsed.nextPowerUpAt : null,
         maxPlayers: this.maxPlayers(),
-        maxLives: GAME_CONFIG.startingLives,
-        maxRounds: GAME_CONFIG.maxRounds,
+        maxLives: LEGACY_STARTING_LIVES,
+        maxRounds: GAME_CONFIG.roundOptions.some(
+          (option) => option === savedMaxRounds,
+        )
+          ? savedMaxRounds
+          : GAME_CONFIG.defaultRounds,
+        roundSeconds: GAME_CONFIG.roundSecondsOptions.some(
+          (option) => option === savedRoundSeconds,
+        )
+          ? savedRoundSeconds
+          : GAME_CONFIG.defaultRoundSeconds,
       };
       if (
         restored.phase === "playing" &&
-        restored.round > GAME_CONFIG.maxRounds
+        restored.round > restored.maxRounds
       ) {
         this.finishGame(restored);
+      } else if (
+        restored.phase === "playing" &&
+        restored.powerUpMode !== "off" &&
+        !restored.nextPowerUpAt
+      ) {
+        restored.nextPowerUpAt = nextPowerUpSpawnAt(restored.powerUpMode);
       }
       this.stateCache = restored;
       return restored;
