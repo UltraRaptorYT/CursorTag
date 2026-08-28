@@ -7,24 +7,25 @@ import {
   Check,
   CircleAlert,
   CircleDot,
-  Eye,
-  Heart,
   LoaderCircle,
   Move3d,
   RotateCcw,
   ShieldCheck,
+  Snail,
   Smartphone,
   Star,
   Trophy,
   UserRound,
   Wifi,
   WifiOff,
+  Zap,
 } from "lucide-react";
 
 import { CursorTagLogo } from "@/components/cursor-tag-logo";
 import {
   DEFAULT_PLAYER_HUE,
   GAME_CONFIG,
+  POWER_UP_CONFIG,
   normalizePlayerHue,
   playerColorFromHue,
 } from "@/lib/game/config";
@@ -93,6 +94,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [calibrationCountdown, setCalibrationCountdown] = useState(3);
 
   const socketRef = useRef<RoomSocket | null>(null);
+  const playerIdRef = useRef("");
   const joinedRef = useRef(false);
   const nicknameRef = useRef("");
   const playerHueRef = useRef(DEFAULT_PLAYER_HUE);
@@ -133,6 +135,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   useEffect(() => {
     const id = getPlayerId(roomCode);
+    playerIdRef.current = id;
     const storedName = localStorage.getItem("cursor-tag-nickname") ?? "";
     const storedHue = normalizePlayerHue(
       Number(localStorage.getItem("cursor-tag-player-hue") ?? DEFAULT_PLAYER_HUE),
@@ -211,12 +214,15 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const localShieldUntil = snapshot.players.find(
     (candidate) => candidate.id === playerId,
   )?.shieldUntil;
+  const localMovementUntil = snapshot.players.find(
+    (candidate) => candidate.id === playerId,
+  )?.movementModifierUntil;
 
   useEffect(() => {
-    if ((!snapshot.invulnerableUntil && !localShieldUntil) || snapshot.phase !== "playing") return;
+    if ((!snapshot.invulnerableUntil && !localShieldUntil && !localMovementUntil) || snapshot.phase !== "playing") return;
     const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
-  }, [localShieldUntil, snapshot.invulnerableUntil, snapshot.phase]);
+  }, [localMovementUntil, localShieldUntil, snapshot.invulnerableUntil, snapshot.phase]);
 
   useEffect(() => {
     if (sensorStatus !== "active") return;
@@ -232,10 +238,30 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
       const origin = originRef.current;
       if (!origin || !calibratedRef.current || snapshotRef.current.phase === "finished") return;
+      const localPlayer = snapshotRef.current.players.find(
+        (candidate) => candidate.id === playerIdRef.current,
+      );
+      const activeModifier =
+        localPlayer?.movementModifierUntil && Date.now() < localPlayer.movementModifierUntil
+          ? localPlayer.movementModifier
+          : null;
+      const movementMultiplier =
+        activeModifier === "boost"
+          ? POWER_UP_CONFIG.boostMultiplier
+          : activeModifier === "slow"
+            ? POWER_UP_CONFIG.slowMultiplier
+            : 1;
+      const movementSmoothing =
+        activeModifier === "boost"
+          ? POWER_UP_CONFIG.boostSmoothing
+          : activeModifier === "slow"
+            ? POWER_UP_CONFIG.slowSmoothing
+            : AIR_MOUSE_CONFIG.smoothing;
       const next = calculateAirMouseAim(
         current,
         origin,
         smoothedAimRef.current,
+        { sensitivity: movementMultiplier, smoothing: movementSmoothing },
       );
       smoothedAimRef.current = next;
 
@@ -408,6 +434,10 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       now < snapshot.invulnerableUntil) ||
       (player?.shieldUntil && now < player.shieldUntil),
   );
+  const movementModifier =
+    player?.movementModifierUntil && now < player.movementModifierUntil
+      ? player.movementModifier
+      : null;
 
   if (roomUnavailable) {
     return (
@@ -526,22 +556,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <Trophy className="size-16 text-[#9b87ff]" />
           <span className="phone-eyebrow mt-6">Game over</span>
-          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">{player?.lives ?? 0} LIVES</h1>
-          <p className="mt-2 font-mono text-sm font-black text-[#9b87ff]">{player?.score ?? 0} points</p>
+          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">{player?.score ?? 0} POINTS</h1>
           <p className="mt-3 text-white/50">Check the big screen for the final ranking.</p>
-        </div>
-      </PhoneShell>
-    );
-  }
-
-  if (snapshot.phase === "playing" && player?.eliminated) {
-    return (
-      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={player.color}>
-        <div className="flex flex-1 flex-col items-center justify-center text-center">
-          <div className="grid size-24 place-items-center rounded-[2rem] border border-white/10 bg-[#191c18] text-white"><Eye className="size-10" /></div>
-          <span className="phone-eyebrow mt-7">No lives left</span>
-          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">YOU’RE OUT.</h1>
-          <p className="mt-4 max-w-xs text-white/50">Your cursor is no longer taggable. Keep watching the chase on the big screen.</p>
         </div>
       </PhoneShell>
     );
@@ -570,13 +586,12 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             {isIt ? <Star className="size-14 fill-white text-white" strokeWidth={2.4} /> : <span className="size-3 rounded-full bg-white" />}
             {isProtected && <span className="absolute -right-2 -top-2 grid size-9 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-lg"><ShieldCheck className="size-5" /></span>}
           </div>
-          <div className="relative mt-8 flex gap-1" aria-label={`${player?.lives ?? 0} lives`}>
-            {Array.from({ length: snapshot.maxLives }, (_, index) => <Heart key={index} className={`size-5 ${index < (player?.lives ?? 0) ? "fill-current" : "opacity-20"}`} />)}
-          </div>
+          <p className="relative mt-8 font-mono text-sm font-black uppercase tracking-[.14em] text-white/65">{player?.score ?? 0} points</p>
           <p className="relative mt-3 text-xs font-black uppercase tracking-[.22em] text-white/55">Round {snapshot.round} / {snapshot.maxRounds}</p>
           <h1 className="relative mt-2 text-5xl font-black leading-[.9] tracking-[-.06em]">{isProtected ? "GET READY" : isIt ? "YOU’RE IT!" : "KEEP MOVING"}</h1>
-          <p className="relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed text-white/70">{isProtected ? "Your shield prevents an instant re-tag. Move clear!" : isIt ? "Tilt to chase another cursor before time runs out." : "Dodge the glowing red cursor. Don’t get tagged."}</p>
+          <p className="relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed text-white/70">{isProtected ? "Your shield prevents an instant re-tag. Move clear!" : isIt ? "Pass it to someone for +1." : "Survive until time runs out for +1."}</p>
           {isProtected && <span className="relative mt-5 inline-flex items-center gap-2 rounded-full bg-white/18 px-4 py-2 text-xs font-black uppercase tracking-[.12em]"><ShieldCheck className="size-4" /> Tag shield</span>}
+          {movementModifier && <span className={`relative mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[.12em] ${movementModifier === "boost" ? "bg-[#b7ff45] text-[#10120f]" : "bg-[#ff9f43] text-[#241302]"}`}>{movementModifier === "boost" ? <Zap className="size-5 fill-current" /> : <Snail className="size-5" />} {movementModifier === "boost" ? `Turbo ×${POWER_UP_CONFIG.boostMultiplier}` : `Slowed ×${POWER_UP_CONFIG.slowMultiplier}`}</span>}
         </div>
         <button type="button" onClick={recalibrateImmediately} disabled={!hasReading} className={`mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/55"}`}><RotateCcw className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`} /> {neutralReset ? "Neutral reset" : "Recalibrate instantly"}</button>
       </div>

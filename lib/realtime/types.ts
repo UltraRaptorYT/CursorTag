@@ -5,7 +5,8 @@ export type CursorPosition = {
   y: number;
 };
 
-export type PowerUpType = "shield" | "freeze" | "bonus";
+export type PowerUpType = "shield" | "boost" | "slow" | "freeze" | "bonus";
+export type MovementModifier = "boost" | "slow";
 
 export type ArenaPowerUp = CursorPosition & {
   id: string;
@@ -30,6 +31,8 @@ export type RoomPlayer = {
   lives: number;
   eliminated: boolean;
   shieldUntil: number | null;
+  movementModifier: MovementModifier | null;
+  movementModifierUntil: number | null;
 };
 
 export type Impact = {
@@ -68,6 +71,8 @@ export function normalizeRoomSnapshot(snapshot: RoomSnapshot): RoomSnapshot {
     players: snapshot.players.map((player) => ({
       ...player,
       shieldUntil: player.shieldUntil ?? null,
+      movementModifier: player.movementModifier ?? null,
+      movementModifierUntil: player.movementModifierUntil ?? null,
     })),
     powerUps: Array.isArray(snapshot.powerUps) ? snapshot.powerUps : [],
     powerUpEvent: snapshot.powerUpEvent ?? null,

@@ -8,6 +8,11 @@ export type AirMouseAim = {
   y: number;
 };
 
+type AirMouseAimOptions = {
+  sensitivity?: number;
+  smoothing?: number;
+};
+
 export const AIR_MOUSE_CONFIG = {
   horizontalAimRangeDegrees: 32,
   verticalAimRangeDegrees: 24,
@@ -38,30 +43,33 @@ export function calculateAirMouseAim(
   current: AirMouseOrientation,
   origin: AirMouseOrientation,
   previousAim: AirMouseAim,
+  options: AirMouseAimOptions = {},
 ): AirMouseAim {
+  const sensitivity = options.sensitivity ?? 1;
+  const smoothing = options.smoothing ?? AIR_MOUSE_CONFIG.smoothing;
   const horizontalDelta = applyDeadZone(
     normalizeAngleDelta(current.alpha, origin.alpha),
   );
   const verticalDelta = applyDeadZone(current.beta - origin.beta);
   const rawAim = {
     x: clampAim(
-      -horizontalDelta /
+      (-horizontalDelta /
         (AIR_MOUSE_CONFIG.horizontalAimRangeDegrees -
-          AIR_MOUSE_CONFIG.deadZoneDegrees),
+          AIR_MOUSE_CONFIG.deadZoneDegrees)) * sensitivity,
     ),
     y: clampAim(
-      -verticalDelta /
+      (-verticalDelta /
         (AIR_MOUSE_CONFIG.verticalAimRangeDegrees -
-          AIR_MOUSE_CONFIG.deadZoneDegrees),
+          AIR_MOUSE_CONFIG.deadZoneDegrees)) * sensitivity,
     ),
   };
 
   return {
     x:
       previousAim.x +
-      (rawAim.x - previousAim.x) * AIR_MOUSE_CONFIG.smoothing,
+      (rawAim.x - previousAim.x) * smoothing,
     y:
       previousAim.y +
-      (rawAim.y - previousAim.y) * AIR_MOUSE_CONFIG.smoothing,
+      (rawAim.y - previousAim.y) * smoothing,
   };
 }

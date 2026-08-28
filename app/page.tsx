@@ -54,7 +54,7 @@ export default function HomePage() {
               TILT.<br />CHASE.<br /><span className="text-[#b7ff45]">TAG.</span>
             </h1>
             <p className="mt-8 max-w-xl text-lg font-medium leading-relaxed text-white/55 sm:text-xl">
-              Tilt to move your colored cursor. The red star is the chaser: tag someone for +1, but let the timer run out and you lose a life. Most lives wins.
+              Tilt to move your cursor. Pass “it” to someone for +1, or survive the timer as a runner for +1. Most points wins.
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">

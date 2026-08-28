@@ -19,6 +19,12 @@ export const POWER_UP_CONFIG = {
   onField: 2,
   pickupRadius: 0.045,
   shieldMs: 4_000,
+  boostMs: 5_000,
+  boostMultiplier: 1.8,
+  boostSmoothing: 0.92,
+  slowMs: 5_000,
+  slowMultiplier: 0.4,
+  slowSmoothing: 0.1,
   freezeMs: 1_000,
   bonusPoints: 2,
 } as const;

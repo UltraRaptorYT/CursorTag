@@ -19,29 +19,13 @@ const HEARTBEAT_INTERVAL_MS = 5_000;
 const HEARTBEAT_TIMEOUT_MS = 15_000;
 const MAX_RECONNECT_DELAY_MS = 8_000;
 
-function getRealtimeBaseUrl() {
-  const configuredUrl = process.env.NEXT_PUBLIC_CURSOR_TAG_WS_URL?.trim();
-  if (!configuredUrl) return null;
-
-  const url = new URL(configuredUrl);
-  if (url.protocol === "wss:") url.protocol = "https:";
-  if (url.protocol === "ws:") url.protocol = "http:";
-  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-  url.pathname = url.pathname.replace(/\/$/, "");
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
 export async function checkRoomExists(roomCode: string) {
-  const url = getRealtimeBaseUrl();
-  if (!url) throw new Error("Realtime service is not configured");
-  url.pathname = `${url.pathname}/rooms/${encodeURIComponent(roomCode)}/status`;
-
-  const response = await fetch(url, {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5_000);
+  const response = await fetch(`/api/rooms/${encodeURIComponent(roomCode)}/status`, {
     cache: "no-store",
-    signal: AbortSignal.timeout(5_000),
-  });
+    signal: controller.signal,
+  }).finally(() => window.clearTimeout(timeout));
   if (!response.ok) throw new Error("Could not check the room");
   const result = (await response.json()) as { exists?: boolean };
   return result.exists === true;

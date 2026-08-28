@@ -56,7 +56,7 @@ function randomUnit() {
 }
 
 function spawnPowerUps() {
-  const types: PowerUpType[] = ["shield", "freeze", "bonus"];
+  const types: PowerUpType[] = ["boost", "slow", "freeze", "bonus"];
   return Array.from({ length: POWER_UP_CONFIG.onField }, (_, index) => ({
     id: crypto.randomUUID(),
     type: types[randomIndex(types.length)],
@@ -385,6 +385,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         lives: GAME_CONFIG.startingLives,
         eliminated: false,
         shieldUntil: null,
+        movementModifier: null,
+        movementModifierUntil: null,
       }));
       state.itPlayerId = eligible[randomIndex(eligible.length)].id;
       state.round = 1;
@@ -429,6 +431,8 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         lives: GAME_CONFIG.startingLives,
         eliminated: false,
         shieldUntil: null,
+        movementModifier: null,
+        movementModifierUntil: null,
       }));
       next.playerDisconnectExpiresAt = { ...state.playerDisconnectExpiresAt };
       next.aspectRatio = state.aspectRatio;
@@ -482,8 +486,10 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         },
         score: existing?.score ?? 0,
         lives: existing?.lives ?? GAME_CONFIG.startingLives,
-        eliminated: existing?.eliminated ?? false,
+        eliminated: false,
         shieldUntil: existing?.shieldUntil ?? null,
+        movementModifier: existing?.movementModifier ?? null,
+        movementModifierUntil: existing?.movementModifierUntil ?? null,
       };
       delete state.playerDisconnectExpiresAt[player.id];
       socket.serializeAttachment({ ...attachment, player });
@@ -563,8 +569,35 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     );
     if (collectedPowerUp) {
       state.powerUps = state.powerUps.filter((powerUp) => powerUp.id !== collectedPowerUp.id);
+      let eventType = collectedPowerUp.type;
       if (collectedPowerUp.type === "shield") {
-        movingPlayer = { ...movingPlayer, shieldUntil: now + POWER_UP_CONFIG.shieldMs };
+        if (movingPlayer.id === state.itPlayerId) {
+          eventType = "boost";
+          movingPlayer = {
+            ...movingPlayer,
+            movementModifier: "boost",
+            movementModifierUntil: now + POWER_UP_CONFIG.boostMs,
+          };
+        } else {
+          movingPlayer = { ...movingPlayer, shieldUntil: now + POWER_UP_CONFIG.shieldMs };
+        }
+      } else if (collectedPowerUp.type === "boost") {
+        movingPlayer = {
+          ...movingPlayer,
+          movementModifier: "boost",
+          movementModifierUntil: now + POWER_UP_CONFIG.boostMs,
+        };
+      } else if (collectedPowerUp.type === "slow") {
+        players = players.map((candidate) =>
+          candidate.id !== movingPlayer.id && candidate.connected && !candidate.eliminated
+            ? {
+                ...candidate,
+                movementModifier: "slow",
+                movementModifierUntil: now + POWER_UP_CONFIG.slowMs,
+              }
+            : candidate,
+        );
+        movingPlayer = players.find((candidate) => candidate.id === movingPlayer.id) ?? movingPlayer;
       } else if (collectedPowerUp.type === "freeze") {
         state.freezeUntil = now + POWER_UP_CONFIG.freezeMs;
         state.frozenPlayerIds = players
@@ -581,7 +614,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
       );
       state.powerUpEvent = {
         id: crypto.randomUUID(),
-        type: collectedPowerUp.type,
+        type: eventType,
         playerId: movingPlayer.id,
         at: now,
       };
@@ -669,14 +702,9 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
   private async handleTimeout(state: StoredRoom) {
     const timedOutPlayerId = state.itPlayerId;
     const players = this.mergePlayers(state).map((player) =>
-      player.id === timedOutPlayerId
-        ? {
-            ...player,
-            score: player.score - 1,
-            lives: Math.max(0, player.lives - 1),
-            eliminated: player.lives <= 1,
-          }
-        : player,
+      player.id !== timedOutPlayerId && player.connected && player.calibrated
+        ? { ...player, score: player.score + 1, eliminated: false }
+        : { ...player, eliminated: false },
     );
     state.players = players;
     state.freezeUntil = null;
@@ -687,8 +715,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     state.powerUps = [];
     state.powerUpEvent = null;
 
-    const survivors = players.filter((player) => !player.eliminated);
-    if (survivors.length <= 1 || state.round >= GAME_CONFIG.maxRounds) {
+    if (state.round >= GAME_CONFIG.maxRounds) {
       this.finishGame(state);
       this.saveState(state);
       await this.scheduleNextAlarm(state);
@@ -846,12 +873,17 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
             typeof player.lives === "number"
               ? player.lives
               : GAME_CONFIG.startingLives,
-          eliminated:
-            typeof player.eliminated === "boolean"
-              ? player.eliminated
-              : false,
+          eliminated: false,
           shieldUntil:
             typeof player.shieldUntil === "number" ? player.shieldUntil : null,
+          movementModifier:
+            player.movementModifier === "boost" || player.movementModifier === "slow"
+              ? player.movementModifier
+              : null,
+          movementModifierUntil:
+            typeof player.movementModifierUntil === "number"
+              ? player.movementModifierUntil
+              : null,
         })),
         playerDisconnectExpiresAt:
           parsed.playerDisconnectExpiresAt &&
@@ -901,7 +933,13 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
           score: stored?.score ?? attachment.player.score,
           lives: stored?.lives ?? attachment.player.lives,
           eliminated: stored?.eliminated ?? attachment.player.eliminated,
-          shieldUntil: stored?.shieldUntil ?? attachment.player.shieldUntil,
+          shieldUntil: stored ? stored.shieldUntil : attachment.player.shieldUntil,
+          movementModifier: stored
+            ? stored.movementModifier
+            : attachment.player.movementModifier,
+          movementModifierUntil: stored
+            ? stored.movementModifierUntil
+            : attachment.player.movementModifierUntil,
           connected: true,
         });
       }

@@ -6,10 +6,10 @@ import {
   Check,
   CircleAlert,
   Expand,
-  Heart,
   LoaderCircle,
   Play,
   RotateCcw,
+  Snail,
   Snowflake,
   Sparkles,
   Smartphone,
@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Trophy,
   Users,
+  Zap,
   WifiOff,
   X,
 } from "lucide-react";
@@ -92,10 +93,7 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
         pendingCursorsRef.current = {};
         setSnapshot(normalizeRoomSnapshot(message.payload.snapshot));
         setNow(Date.now());
-        const timedOut = message.payload.snapshot.players.find(
-          (player) => player.id === message.payload.timedOutPlayerId,
-        );
-        setNotice(`${timedOut?.name ?? "The chaser"} ran out of time −1`);
+        setNotice("Runners survived +1");
         window.setTimeout(() => setNotice(null), 1_800);
       }
       if (message.type === "cursor") {
@@ -218,8 +216,8 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
             <h1 className="mt-4 text-5xl font-black leading-[.92] tracking-[-.06em] sm:text-7xl">
               GET YOUR<br />CURSORS IN.
             </h1>
-            <p className="mt-5 max-w-lg text-lg leading-relaxed text-white/48">
-              Scan with each phone, pick a name and hue, then point the phone at the center target to calibrate.
+            <p className="mt-5 max-w-lg text-lg font-semibold leading-relaxed text-white/65">
+              Scan → pick a color → aim at the center dot.
             </p>
 
             <div className="mt-8 flex flex-col gap-5 sm:flex-row sm:items-center">
@@ -233,20 +231,26 @@ export default function HostClient({ initialRoomCode }: { initialRoomCode: strin
               </div>
             </div>
             <div className="mt-7 grid max-w-xl grid-cols-3 gap-2">
-              <RuleCard number="1" title="Tilt to move" detail="Your phone controls your colored cursor." />
-              <RuleCard number="2" title="Tag for +1" detail="The red star chases the other players." />
-              <RuleCard number="3" title="Save lives" detail="A timeout costs one. Most lives wins." />
+              <RuleCard number="1" title="TILT" detail="Move" />
+              <RuleCard number="2" title="TAG" detail="Score +1" />
+              <RuleCard number="3" title="SURVIVE" detail="Score +1" />
             </div>
-            <p className="mt-3 max-w-xl text-xs font-bold text-white/35">Power-ups: shield blocks tags · snowflake freezes rivals · sparkles give +2 points.</p>
           </div>
 
           <div className="rounded-[2rem] border border-white/10 bg-white/[.055] p-5 shadow-2xl backdrop-blur-sm sm:p-7">
-            <div className="flex items-end justify-between border-b border-white/8 pb-5">
+            <div className="flex items-end justify-between">
               <div>
                 <p className="text-xs font-black uppercase tracking-[.18em] text-[#b7ff45]">Live warm-up</p>
                 <p className="mt-1 text-3xl font-black tracking-[-.04em]">Move around now</p>
               </div>
               <span className="flex items-center gap-2 text-sm font-black text-white/45"><Users className="size-5 text-[#7c5cff]" />{snapshot.players.length} / {snapshot.maxPlayers}</span>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-white/8 pb-4" aria-label="Power-up legend">
+              <span className="mr-1 text-[11px] font-black uppercase tracking-[.16em] text-[#b7ff45]">Power-ups</span>
+              <PowerUpLegendItem type="boost" />
+              <PowerUpLegendItem type="slow" />
+              <PowerUpLegendItem type="freeze" />
+              <PowerUpLegendItem type="bonus" />
             </div>
 
             <div className="relative mt-5 min-h-72 overflow-hidden rounded-2xl border border-white/8 bg-[#0f110e]">
@@ -290,10 +294,10 @@ function CalibrationTarget() {
 
 function RuleCard({ number, title, detail }: { number: string; title: string; detail: string }) {
   return (
-    <div className="rounded-xl border border-white/8 bg-white/[.04] p-3">
-      <span className="font-mono text-[10px] font-black text-[#b7ff45]">{number}</span>
-      <p className="mt-1 text-xs font-black text-white/80">{title}</p>
-      <p className="mt-1 text-[10px] font-semibold leading-snug text-white/35">{detail}</p>
+    <div className="rounded-xl border border-white/12 bg-white/[.06] px-4 py-3">
+      <span className="font-mono text-[11px] font-black text-[#b7ff45]">{number}</span>
+      <p className="mt-1 text-sm font-black tracking-[.04em] text-white">{title}</p>
+      <p className="mt-0.5 text-xs font-bold leading-snug text-white/60">{detail}</p>
     </div>
   );
 }
@@ -345,19 +349,16 @@ function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; 
       </div>
 
       {snapshot.powerUps.map((powerUp) => <ArenaPowerUpView key={powerUp.id} powerUp={powerUp} />)}
-      {snapshot.players.map((player) => <LiveCursor key={player.id} player={player} isIt={player.id === snapshot.itPlayerId} frozen={Boolean(snapshot.freezeUntil && now < snapshot.freezeUntil && snapshot.frozenPlayerIds.includes(player.id))} protectedFromTag={Boolean((snapshot.protectedPlayerId === player.id && snapshot.invulnerableUntil && now < snapshot.invulnerableUntil) || (player.shieldUntil && now < player.shieldUntil))} />)}
+      {snapshot.players.map((player) => <LiveCursor key={player.id} player={player} isIt={player.id === snapshot.itPlayerId} frozen={Boolean(snapshot.freezeUntil && now < snapshot.freezeUntil && snapshot.frozenPlayerIds.includes(player.id))} protectedFromTag={Boolean((snapshot.protectedPlayerId === player.id && snapshot.invulnerableUntil && now < snapshot.invulnerableUntil) || (player.shieldUntil && now < player.shieldUntil))} movementModifier={player.movementModifierUntil && now < player.movementModifierUntil ? player.movementModifier : null} />)}
 
       {recentPowerUp && powerUpPlayer && <PowerUpToast type={recentPowerUp.type} playerName={powerUpPlayer.name} />}
 
       <div className="pointer-events-none absolute bottom-6 left-6 z-10 flex max-w-[75vw] flex-wrap gap-2">
         {snapshot.players.map((player) => (
-          <div key={player.id} className={`flex items-center gap-2 rounded-xl border border-white/8 bg-black/35 px-3 py-2 text-xs backdrop-blur ${player.eliminated ? "opacity-30" : ""}`}>
+          <div key={player.id} className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/35 px-3 py-2 text-xs backdrop-blur">
             <span className="size-2.5 rounded-full" style={{ backgroundColor: player.color }} />
             <strong>{player.name}</strong>
-            <span className="flex gap-0.5" aria-label={`${player.lives} lives`}>
-              {Array.from({ length: snapshot.maxLives }, (_, index) => <Heart key={index} className={`size-3 ${index < player.lives ? "fill-[#ff5c5c] text-[#ff5c5c]" : "text-white/15"}`} />)}
-            </span>
-            <span className="font-mono text-white/40">{player.score > 0 ? "+" : ""}{player.score}</span>
+            <span className="font-mono font-black text-[#b7ff45]">{player.score} pts</span>
           </div>
         ))}
       </div>
@@ -377,22 +378,35 @@ function GameScreen({ snapshot, now, notice, onEnd }: { snapshot: RoomSnapshot; 
 
 const POWER_UP_STYLE: Record<PowerUpType, { label: string; className: string }> = {
   shield: { label: "Shield", className: "border-[#b7ff45] bg-[#b7ff45] text-[#10120f] shadow-[0_0_28px_rgba(183,255,69,.7)]" },
+  boost: { label: "Turbo", className: "border-[#b7ff45] bg-[#b7ff45] text-[#10120f] shadow-[0_0_28px_rgba(183,255,69,.7)]" },
+  slow: { label: "Slow field", className: "border-[#ff9f43] bg-[#ff9f43] text-[#241302] shadow-[0_0_28px_rgba(255,159,67,.7)]" },
   freeze: { label: "Freeze", className: "border-[#70dcff] bg-[#70dcff] text-[#0b2530] shadow-[0_0_28px_rgba(112,220,255,.7)]" },
   bonus: { label: "+2", className: "border-[#ffbe3d] bg-[#ffbe3d] text-[#2a1b00] shadow-[0_0_28px_rgba(255,190,61,.7)]" },
 };
 
 function PowerUpIcon({ type, className = "size-5" }: { type: PowerUpType; className?: string }) {
   if (type === "shield") return <ShieldCheck className={className} />;
+  if (type === "boost") return <Zap className={className} />;
+  if (type === "slow") return <Snail className={className} />;
   if (type === "freeze") return <Snowflake className={className} />;
   return <Sparkles className={className} />;
+}
+
+function PowerUpLegendItem({ type }: { type: Exclude<PowerUpType, "shield"> }) {
+  const style = POWER_UP_STYLE[type];
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[.07] px-3 py-2 text-xs font-black uppercase tracking-[.08em] text-white/75">
+      <PowerUpIcon type={type} className="size-4 text-white" />
+      {style.label}
+    </span>
+  );
 }
 
 function ArenaPowerUpView({ powerUp }: { powerUp: ArenaPowerUp }) {
   const style = POWER_UP_STYLE[powerUp.type];
   return (
-    <div className="arena-power-up pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 text-center" style={{ left: `${powerUp.x * 100}%`, top: `${powerUp.y * 100}%` }}>
-      <span className={`grid size-11 place-items-center rounded-full border-4 border-white ${style.className}`}><PowerUpIcon type={powerUp.type} /></span>
-      <span className="mt-2 block rounded bg-black/55 px-2 py-1 text-[9px] font-black uppercase tracking-[.12em] text-white/70">{style.label}</span>
+    <div className="arena-power-up pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 text-center" style={{ left: `${powerUp.x * 100}%`, top: `${powerUp.y * 100}%` }} role="img" aria-label={`${style.label} power-up`} title={style.label}>
+      <span className={`grid size-13 place-items-center rounded-full border-4 border-white ${style.className}`}><PowerUpIcon type={powerUp.type} className="size-6" /></span>
     </div>
   );
 }
@@ -405,15 +419,16 @@ function PowerUpToast({ type, playerName }: { type: PowerUpType; playerName: str
   );
 }
 
-function LiveCursor({ player, isIt, frozen, protectedFromTag }: { player: RoomPlayer; isIt: boolean; frozen: boolean; protectedFromTag: boolean }) {
+function LiveCursor({ player, isIt, frozen, protectedFromTag, movementModifier }: { player: RoomPlayer; isIt: boolean; frozen: boolean; protectedFromTag: boolean; movementModifier: RoomPlayer["movementModifier"] }) {
   return (
-    <div className={`live-cursor pointer-events-none absolute left-0 top-0 z-20 ${isIt ? "is-it" : ""} ${player.connected ? "" : "is-disconnected"} ${frozen ? "is-frozen" : ""} ${protectedFromTag ? "is-protected" : ""} ${player.eliminated ? "is-eliminated" : ""}`} style={{ transform: `translate3d(calc(${player.position.x * 100}vw - 28px), calc(${player.position.y * 100}vh - 28px), 0)` }}>
+    <div className={`live-cursor pointer-events-none absolute left-0 top-0 z-20 ${isIt ? "is-it" : ""} ${player.connected ? "" : "is-disconnected"} ${frozen ? "is-frozen" : ""} ${protectedFromTag ? "is-protected" : ""}`} style={{ transform: `translate3d(calc(${player.position.x * 100}vw - 28px), calc(${player.position.y * 100}vh - 28px), 0)` }}>
       <div className="cursor-name absolute bottom-[66px] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-black text-[#0f110e] shadow-xl" style={{ backgroundColor: player.color }}>
-        {player.name}{player.eliminated ? " · OUT" : isIt ? " · IT" : ""}{!player.connected ? " · OFFLINE" : ""}
+        {player.name}{isIt ? " · IT" : ""}{!player.connected ? " · OFFLINE" : ""}
       </div>
       <div className="cursor-orb relative grid size-14 place-items-center rounded-full border-[5px] border-[#f8f8ef] shadow-[0_8px_30px_rgba(0,0,0,.35)]" style={{ backgroundColor: player.color }} role="img" aria-label={isIt ? `${player.name} is it` : `${player.name}'s cursor`}>
         {isIt ? <Star className="size-7 fill-white text-white" strokeWidth={2.5} /> : <span className="size-2 rounded-full bg-white" />}
         {protectedFromTag && <span className="absolute -right-3 -top-3 grid size-6 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-lg"><ShieldCheck className="size-3.5" /></span>}
+        {movementModifier && <span className={`absolute -bottom-4 left-1/2 grid size-6 -translate-x-1/2 place-items-center rounded-full shadow-lg ${movementModifier === "boost" ? "bg-[#b7ff45] text-[#10120f]" : "bg-[#ff9f43] text-[#241302]"}`} role="img" aria-label={movementModifier === "boost" ? "Turbo active" : "Slow active"}>{movementModifier === "boost" ? <Zap className="size-3.5" /> : <Snail className="size-3.5" />}</span>}
       </div>
     </div>
   );
@@ -432,13 +447,13 @@ function LobbyPlayer({ player, compact = false }: { player: RoomPlayer; compact?
   return (
     <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${player.connected ? "border-white/8 bg-black/15" : "border-white/5 bg-black/10 opacity-45"}`}>
       <span className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-black text-[#10120f]" style={{ backgroundColor: player.color }}>{player.name.charAt(0).toUpperCase()}</span>
-      <div className="min-w-0 flex-1"><p className="truncate font-black">{player.name}</p><p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-bold text-white/35">{!player.connected ? <><WifiOff className="size-3" /> Reconnecting · removes in 10s</> : player.calibrated ? <><Check className="size-3 text-[#b7ff45]" /> Ready · {player.lives} lives</> : <><LoaderCircle className="size-3 animate-spin" /> Calibrating</>}</p></div>
+      <div className="min-w-0 flex-1"><p className="truncate font-black">{player.name}</p><p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-bold text-white/35">{!player.connected ? <><WifiOff className="size-3" /> Reconnecting · removes in 10s</> : player.calibrated ? <><Check className="size-3 text-[#b7ff45]" /> Ready</> : <><LoaderCircle className="size-3 animate-spin" /> Calibrating</>}</p></div>
     </div>
   );
 }
 
 function ResultsScreen({ players, onReset }: { players: RoomPlayer[]; onReset: () => void }) {
-  const ranked = useMemo(() => [...players].sort((a, b) => b.lives - a.lives || b.score - a.score), [players]);
+  const ranked = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
   return (
     <main className="results-shell min-h-dvh bg-[#10120f] px-6 py-10 text-[#f5f5ec]">
       <div className="landing-grid fixed inset-0 opacity-20" />
@@ -452,8 +467,8 @@ function ResultsScreen({ players, onReset }: { players: RoomPlayer[]; onReset: (
               <span className="w-8 font-mono text-xl font-black text-white/25">{String(index + 1).padStart(2, "0")}</span>
               <span className="size-4 rounded-full" style={{ backgroundColor: player.color }} />
               <strong className="flex-1 text-xl">{player.name}</strong>
-              <span className="flex items-center gap-1 font-mono text-sm font-black text-[#ff8585]"><Heart className="size-4 fill-current" />{player.lives}</span>
-              <span className="w-14 text-right font-mono text-2xl font-black tabular-nums">{player.score > 0 ? "+" : ""}{player.score}</span>
+              <span className="text-xs font-black uppercase tracking-[.12em] text-white/35">points</span>
+              <span className="w-14 text-right font-mono text-2xl font-black tabular-nums text-[#b7ff45]">{player.score}</span>
             </div>
           ))}
         </div>
