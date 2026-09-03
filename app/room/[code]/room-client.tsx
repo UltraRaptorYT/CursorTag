@@ -601,7 +601,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             onChange={chooseHue}
             onCommit={syncPlayerHue}
           />
-          <div className="mt-7 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm"><Move3d className="size-4 text-[#9b87ff]" /> Warm up while others join</div>
+          <button type="button" onClick={recalibrateImmediately} disabled={!hasReading} className={`mt-4 flex h-13 w-full max-w-sm items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/65"}`}><RotateCcw className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`} /> {neutralReset ? "Center recalibrated" : "Recalibrate center"}</button>
+          <div className="mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm"><Move3d className="size-4 text-[#9b87ff]" /> Warm up while others join</div>
         </div>
       </PhoneShell>
     );

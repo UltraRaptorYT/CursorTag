@@ -115,7 +115,7 @@ button:not(:disabled) {
 
 .practice-cursor {
   transform: translate3d(-50%, -50%, 0);
-  transition: left 85ms cubic-bezier(0.22, 1, 0.36, 1), top 85ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
+  transition: left 55ms cubic-bezier(0.22, 1, 0.36, 1), top 55ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
   will-change: left, top;
 }
 

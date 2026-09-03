@@ -16,8 +16,8 @@ type AirMouseAimOptions = {
 export const AIR_MOUSE_CONFIG = {
   horizontalAimRangeDegrees: 32,
   verticalAimRangeDegrees: 24,
-  smoothing: 0.32,
-  sendIntervalMs: 33,
+  smoothing: 0.45,
+  sendIntervalMs: 30,
   aimChangeThreshold: 0.0015,
   deadZoneDegrees: 1.1,
 } as const;

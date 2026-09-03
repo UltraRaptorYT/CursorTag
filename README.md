@@ -60,7 +60,7 @@ bun run realtime:smoke
 
 ## Latency tuning
 
-The controller maps calibrated `alpha` rotation to horizontal aim and `beta` to vertical aim over a 32° × 24° range. A `0.32` low-pass blend, 1.1° neutral dead zone, and 33 ms update interval filter hand jitter. During a network spike, the phone drops excess queued cursor frames and the host catches up with a capped 65 ms render blend instead of replaying stale movement as a jump.
+The controller maps calibrated `alpha` rotation to horizontal aim and `beta` to vertical aim over a 32° × 24° range. A `0.45` low-pass blend, 1.1° neutral dead zone, and 30 ms update interval filter hand jitter without making direction changes feel heavy. During a network spike, the phone drops excess queued cursor frames and the host catches up with a capped 40 ms render blend instead of replaying stale movement as a jump.
 
 The controller header shows WebSocket round-trip time:
 

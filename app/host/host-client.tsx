@@ -47,6 +47,10 @@ import {
   type ServerRoomMessage,
 } from "@/lib/realtime/types";
 
+const CURSOR_RENDER_RESPONSE_MS = 40;
+const CURSOR_MAX_SPEED_PER_SECOND = 3.2;
+const CURSOR_SNAP_DISTANCE = 0.0005;
+
 function emptySnapshot(): RoomSnapshot {
   return {
     phase: "lobby",
@@ -1023,18 +1027,28 @@ function useSmoothedLiveCursor(position: RoomPlayer["position"]) {
         rendered.x = target.x;
         rendered.y = target.y;
       } else {
-        const blend = 1 - Math.exp(-(elapsedSeconds * 1_000) / 65);
-        let stepX = (target.x - rendered.x) * blend;
-        let stepY = (target.y - rendered.y) * blend;
-        const stepDistance = Math.hypot(stepX, stepY);
-        const maxStep = 1.8 * elapsedSeconds;
-        if (stepDistance > maxStep && stepDistance > 0) {
-          const scale = maxStep / stepDistance;
-          stepX *= scale;
-          stepY *= scale;
+        const distanceX = target.x - rendered.x;
+        const distanceY = target.y - rendered.y;
+        const distance = Math.hypot(distanceX, distanceY);
+
+        if (distance <= CURSOR_SNAP_DISTANCE) {
+          rendered.x = target.x;
+          rendered.y = target.y;
+        } else {
+          const blend =
+            1 - Math.exp(-(elapsedSeconds * 1_000) / CURSOR_RENDER_RESPONSE_MS);
+          let stepX = distanceX * blend;
+          let stepY = distanceY * blend;
+          const stepDistance = Math.hypot(stepX, stepY);
+          const maxStep = CURSOR_MAX_SPEED_PER_SECOND * elapsedSeconds;
+          if (stepDistance > maxStep) {
+            const scale = maxStep / stepDistance;
+            stepX *= scale;
+            stepY *= scale;
+          }
+          rendered.x += stepX;
+          rendered.y += stepY;
         }
-        rendered.x += stepX;
-        rendered.y += stepY;
       }
 
       element.style.transform = `translate3d(${rendered.x * window.innerWidth - 28}px, ${rendered.y * window.innerHeight - 28}px, 0)`;
