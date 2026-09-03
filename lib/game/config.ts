@@ -1,5 +1,5 @@
 export const GAME_CONFIG = {
-  maxPlayers: 8,
+  maxPlayers: 16,
   minPlayers: 2,
   collisionRadius: 0.058,
   freezeMs: 300,
