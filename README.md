@@ -78,6 +78,7 @@ Authenticate once, then deploy:
 
 ```bash
 bunx wrangler login
+bun run realtime:types
 bun run realtime:deploy
 ```
 
