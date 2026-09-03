@@ -12,7 +12,7 @@ Cursor Tag is a disposable, browser-based multiplayer party game. Players join f
 - Before starting, the host chooses 5, 10, or 15 rounds and a fixed 10, 15, or 20-second round timer.
 - After the selected number of rounds, the player with the most points wins.
 - Disconnected cursors get a 10-second reconnect grace period, then leave the room automatically. A disconnected chaser is released immediately so the game cannot get stuck.
-- Rooms support 2–8 players by default. Change `MAX_PLAYERS` in `cloudflare/wrangler.jsonc` to use a different cap (2–16).
+- Rooms support 2–16 players by default. Change `MAX_PLAYERS` in `cloudflare/wrangler.jsonc` to use a lower cap.
 
 ## Architecture
 

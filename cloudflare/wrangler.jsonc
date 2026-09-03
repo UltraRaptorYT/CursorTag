@@ -10,7 +10,7 @@
     "traces": { "enabled": true, "head_sampling_rate": 0.05 }
   },
   "vars": {
-    "MAX_PLAYERS": "8"
+    "MAX_PLAYERS": "16"
   },
   "durable_objects": {
     "bindings": [
@@ -27,4 +27,3 @@
     }
   ]
 }
-

@@ -97,7 +97,7 @@ export default function HomePage() {
         </section>
 
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 py-5 text-xs font-semibold text-white/30">
-          <span>Built for the big screen.</span><span>2–8 players · disposable rooms · zero sign-up</span>
+          <span>Built for the big screen.</span><span>2–16 players · disposable rooms · zero sign-up</span>
         </footer>
       </div>
     </main>
