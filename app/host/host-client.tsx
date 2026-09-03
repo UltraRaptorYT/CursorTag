@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   Check,
@@ -120,12 +120,23 @@ export default function HostClient({
         pendingCursorsRef.current = {};
         setSnapshot(normalizeRoomSnapshot(message.payload));
         if (message.payload.phase === "playing") setNow(Date.now());
+        if (message.type === "tag") {
+          const taggedPlayer = message.payload.players.find(
+            (player) => player.id === message.payload.impact?.toPlayerId,
+          );
+          setNotice(
+            taggedPlayer
+              ? `${taggedPlayer.name} caught · safe players +2 · caught +1`
+              : "Round scored · safe +2 · caught +1",
+          );
+          window.setTimeout(() => setNotice(null), 1_800);
+        }
       }
       if (message.type === "timeout") {
         pendingCursorsRef.current = {};
         setSnapshot(normalizeRoomSnapshot(message.payload.snapshot));
         setNow(Date.now());
-        setNotice("Runners survived +1");
+        setNotice("Runners +2 · catcher +1");
         window.setTimeout(() => setNotice(null), 1_800);
       }
       if (message.type === "cursor") {
@@ -585,14 +596,14 @@ function HowToPlayDialog({ onClose }: { onClose: () => void }) {
           <VisualRule
             number="3"
             title="Score points"
-            detail="Tag someone or survive until the timer ends."
+            detail="Everyone gets +1 for playing the round. Avoid the miss to earn another +1."
           >
             <div className="grid h-50 grid-cols-2 gap-px overflow-hidden rounded-2xl bg-white/8">
               <div className="flex flex-col items-center justify-center bg-[#0f110e] text-center">
                 <Star className="size-7 fill-[#ff5c5c] text-[#ff5c5c]" />
                 <span className="text-xl font-black text-[#b7ff45]">+1</span>
                 <span className="text-[9px] font-black uppercase text-white/35">
-                  Tag
+                  Play
                 </span>
               </div>
               <div className="flex flex-col items-center justify-center bg-[#0f110e] text-center">
@@ -601,7 +612,7 @@ function HowToPlayDialog({ onClose }: { onClose: () => void }) {
                 </span>
                 <span className="text-xl font-black text-[#b7ff45]">+1</span>
                 <span className="text-[9px] font-black uppercase text-white/35">
-                  Survive
+                  Stay safe
                 </span>
               </div>
             </div>
@@ -960,9 +971,11 @@ function ArenaPowerUpView({ powerUp }: { powerUp: ArenaPowerUp }) {
       title={style.label}
     >
       <span
-        className={`grid size-13 place-items-center rounded-full border-4 border-white ${style.className}`}
+        className={`grid size-14 rotate-45 place-items-center rounded-[0.8rem] border-4 border-white ${style.className}`}
       >
-        <PowerUpIcon type={powerUp.type} className="size-6" />
+        <span className="grid -rotate-45 place-items-center">
+          <PowerUpIcon type={powerUp.type} className="size-6" />
+        </span>
       </span>
     </div>
   );
@@ -983,6 +996,58 @@ function PowerUpToast({
   );
 }
 
+function useSmoothedLiveCursor(position: RoomPlayer["position"]) {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const targetRef = useRef({ x: position.x, y: position.y });
+  const renderedRef = useRef({ x: position.x, y: position.y });
+
+  useEffect(() => {
+    targetRef.current = { x: position.x, y: position.y };
+  }, [position.x, position.y]);
+
+  useLayoutEffect(() => {
+    let frame = 0;
+    let previousFrameAt = performance.now();
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    function renderCursor(timestamp: number) {
+      const element = elementRef.current;
+      if (!element) return;
+
+      const elapsedSeconds = Math.min(0.05, (timestamp - previousFrameAt) / 1_000);
+      previousFrameAt = timestamp;
+      const target = targetRef.current;
+      const rendered = renderedRef.current;
+
+      if (reduceMotion.matches) {
+        rendered.x = target.x;
+        rendered.y = target.y;
+      } else {
+        const blend = 1 - Math.exp(-(elapsedSeconds * 1_000) / 65);
+        let stepX = (target.x - rendered.x) * blend;
+        let stepY = (target.y - rendered.y) * blend;
+        const stepDistance = Math.hypot(stepX, stepY);
+        const maxStep = 1.8 * elapsedSeconds;
+        if (stepDistance > maxStep && stepDistance > 0) {
+          const scale = maxStep / stepDistance;
+          stepX *= scale;
+          stepY *= scale;
+        }
+        rendered.x += stepX;
+        rendered.y += stepY;
+      }
+
+      element.style.transform = `translate3d(${rendered.x * window.innerWidth - 28}px, ${rendered.y * window.innerHeight - 28}px, 0)`;
+      frame = window.requestAnimationFrame(renderCursor);
+    }
+
+    frame = window.requestAnimationFrame(renderCursor);
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  return elementRef;
+}
+
 function LiveCursor({
   player,
   isIt,
@@ -996,12 +1061,12 @@ function LiveCursor({
   protectedFromTag: boolean;
   movementModifier: RoomPlayer["movementModifier"];
 }) {
+  const cursorRef = useSmoothedLiveCursor(player.position);
+
   return (
     <div
+      ref={cursorRef}
       className={`live-cursor pointer-events-none absolute left-0 top-0 z-20 ${isIt ? "is-it" : ""} ${player.connected ? "" : "is-disconnected"} ${frozen ? "is-frozen" : ""} ${protectedFromTag ? "is-protected" : ""}`}
-      style={{
-        transform: `translate3d(calc(${player.position.x * 100}vw - 28px), calc(${player.position.y * 100}vh - 28px), 0)`,
-      }}
     >
       <div
         className="cursor-name absolute bottom-[66px] left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-black text-[#0f110e] shadow-xl"

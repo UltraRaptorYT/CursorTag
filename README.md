@@ -5,11 +5,11 @@ Cursor Tag is a disposable, browser-based multiplayer party game. Players join f
 ## Game rules
 
 - One connected player is randomly selected as **it**.
-- The chaser scores `+1` by colliding with another cursor. Both cursors freeze for 300 ms, the tagged player becomes it, and receives a 1.5-second shield against an instant re-tag.
-- If time expires, every connected runner scores `+1` for surviving. Nobody is eliminated, so everyone plays the full game.
+- Every connected, calibrated player earns `+1` for completing a round. When somebody is tagged, everyone except the caught player earns another `+1`; when time expires, every runner earns the extra `+1` instead.
+- The tagged player becomes it after a 600 ms breather and receives a 2-second shield against an instant re-tag. Nobody is eliminated, so everyone plays the full game.
 - Calibrated phones can move immediately in the warm-up arena before the host starts the round.
 - Power-ups spawn one at a time at random moments during play: 5-second Turbo movement, a 5-second Slow Field against rivals, a 1-second rival freeze, or a `+2` point bonus. The host can choose Off, Normal (every 3–6 seconds, up to 3 on screen), or Chaos (every 1.5–3 seconds, up to 5). Turbo makes movement faster and more responsive; Slow Field gives rivals a heavy movement drag.
-- Before starting, the host chooses 5, 10, or 15 rounds and a fixed 10, 15, or 20-second round timer.
+- Before starting, the host chooses 10, 15, 20, or 30 rounds and a fixed 15, 20, or 30-second round timer. New rooms default to 20 rounds of 20 seconds for a better eight-player session.
 - After the selected number of rounds, the player with the most points wins.
 - Disconnected cursors get a 10-second reconnect grace period, then leave the room automatically. A disconnected chaser is released immediately so the game cannot get stuck.
 - Rooms support 2–16 players by default. Change `MAX_PLAYERS` in `cloudflare/wrangler.jsonc` to use a lower cap.
@@ -60,7 +60,7 @@ bun run realtime:smoke
 
 ## Latency tuning
 
-The controller preserves the original airmouse mapping: calibrated `alpha` rotation controls horizontal aim, `beta` controls vertical aim, the ranges are 32° × 24°, smoothing is `0.35`, and updates are sent every 50 ms. Cursor Tag adds only the requested 1.5° neutral dead zone. The host retains the original 80 ms linear interpolation.
+The controller maps calibrated `alpha` rotation to horizontal aim and `beta` to vertical aim over a 32° × 24° range. A `0.32` low-pass blend, 1.1° neutral dead zone, and 33 ms update interval filter hand jitter. During a network spike, the phone drops excess queued cursor frames and the host catches up with a capped 65 ms render blend instead of replaying stale movement as a jump.
 
 The controller header shows WebSocket round-trip time:
 

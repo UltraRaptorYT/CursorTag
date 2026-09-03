@@ -18,6 +18,7 @@ type RoomSocketOptions = {
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const HEARTBEAT_TIMEOUT_MS = 15_000;
 const MAX_RECONNECT_DELAY_MS = 8_000;
+const MAX_CURSOR_BUFFERED_BYTES = 512;
 
 export async function checkRoomExists(roomCode: string) {
   const controller = new AbortController();
@@ -59,6 +60,12 @@ export function createRoomSocket(options: RoomSocketOptions) {
 
   function send(message: ClientRoomMessage) {
     if (socket?.readyState !== WebSocket.OPEN) return false;
+    if (
+      message.type === "cursor" &&
+      socket.bufferedAmount > MAX_CURSOR_BUFFERED_BYTES
+    ) {
+      return false;
+    }
     socket.send(JSON.stringify(message));
     return true;
   }

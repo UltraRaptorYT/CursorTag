@@ -4,8 +4,10 @@ import {
   GAME_CONFIG,
   LEGACY_STARTING_LIVES,
   POWER_UP_CONFIG,
-  PLAYER_COLORS,
+  nearestAvailablePlayerHue,
+  nearestPlayerHueSlot,
   playerColorFromHue,
+  playerHueFromColor,
 } from "../lib/game/config";
 import type {
   ClientRoomMessage,
@@ -85,6 +87,17 @@ function nextPowerUpSpawnAt(mode: PowerUpMode, now = Date.now()) {
 
 function roundDurationMs(roundSeconds: number) {
   return roundSeconds * 1_000;
+}
+
+function awardRoundPoints(players: RoomPlayer[], missedPlayerId: string | null) {
+  return players.map((player) =>
+    player.connected && player.calibrated
+      ? {
+          ...player,
+          score: player.score + (player.id === missedPlayerId ? 1 : 2),
+        }
+      : player,
+  );
 }
 
 function clampPosition(position: CursorPosition): CursorPosition {
@@ -497,15 +510,19 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
         return;
       }
 
-      const usedColors = new Set(currentPlayers.map((player) => player.color));
-      const requestedColor = Number.isFinite(message.payload.hue)
-        ? playerColorFromHue(message.payload.hue as number)
-        : null;
-      const color =
-        requestedColor ??
-        existing?.color ??
-        PLAYER_COLORS.find((candidate) => !usedColors.has(candidate)) ??
-        PLAYER_COLORS[currentPlayers.length % PLAYER_COLORS.length];
+      const unavailableHues = new Set(
+        currentPlayers
+          .filter((player) => player.id !== attachment.clientId)
+          .map((player) => playerHueFromColor(player.color))
+          .filter((hue): hue is number => hue !== null)
+          .map(nearestPlayerHueSlot),
+      );
+      const requestedHue = Number.isFinite(message.payload.hue)
+        ? Number(message.payload.hue)
+        : playerHueFromColor(existing?.color ?? "") ?? currentPlayers.length * 23;
+      const color = playerColorFromHue(
+        nearestAvailablePlayerHue(requestedHue, unavailableHues),
+      );
       const player: RoomPlayer = {
         id: attachment.clientId,
         name: cleanName,
@@ -693,9 +710,7 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
     taggedPlayer: RoomPlayer,
   ) {
     const now = Date.now();
-    state.players = players.map((player) =>
-      player.id === itPlayer.id ? { ...player, score: player.score + 1 } : player,
-    );
+    state.players = awardRoundPoints(players, taggedPlayer.id);
     if (state.round >= state.maxRounds) {
       this.finishGame(state);
       this.saveState(state);
@@ -729,11 +744,10 @@ export class GameRoom extends DurableObject<Cloudflare.Env> {
 
   private async handleTimeout(state: StoredRoom) {
     const timedOutPlayerId = state.itPlayerId;
-    const players = this.mergePlayers(state).map((player) =>
-      player.id !== timedOutPlayerId && player.connected && player.calibrated
-        ? { ...player, score: player.score + 1, eliminated: false }
-        : { ...player, eliminated: false },
-    );
+    const players = awardRoundPoints(
+      this.mergePlayers(state),
+      timedOutPlayerId,
+    ).map((player) => ({ ...player, eliminated: false }));
     state.players = players;
     state.freezeUntil = null;
     state.frozenPlayerIds = [];

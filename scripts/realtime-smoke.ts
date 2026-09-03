@@ -76,14 +76,14 @@ try {
   );
   host.send({
     type: "host-settings",
-    payload: { powerUpMode: "chaos", maxRounds: 5, roundSeconds: 10 },
+    payload: { powerUpMode: "chaos", maxRounds: 10, roundSeconds: 15 },
   });
   await host.waitFor(
     (message) =>
       message.type === "snapshot" &&
       message.payload.powerUpMode === "chaos" &&
-      message.payload.maxRounds === 5 &&
-      message.payload.roundSeconds === 10,
+      message.payload.maxRounds === 10 &&
+      message.payload.roundSeconds === 15,
     5_000,
     "chaos room setting",
   );
@@ -145,8 +145,8 @@ try {
   if (
     !started.payload.roundDurationMs ||
     !tagged.payload.roundDurationMs ||
-    started.payload.roundDurationMs !== 10_000 ||
-    tagged.payload.roundDurationMs !== 10_000
+    started.payload.roundDurationMs !== 15_000 ||
+    tagged.payload.roundDurationMs !== 15_000
   ) {
     throw new Error("The host-selected round time was not preserved");
   }
@@ -159,7 +159,10 @@ try {
     throw new Error("The next round timer was not reset from the tag time");
   }
   const scoringPlayer = tagged.payload.players.find((player) => player.id === itId);
-  if (scoringPlayer?.score !== 1) throw new Error("Tag score was not retained");
+  const caughtPlayer = tagged.payload.players.find((player) => player.id === target.id);
+  if (scoringPlayer?.score !== 2 || caughtPlayer?.score !== 1) {
+    throw new Error("Participation and safe-player scores were not retained");
+  }
 
   const taggedClient = target.id === "smoke-player-1" ? playerOne : playerTwo;
   const freezeWait = Math.max(

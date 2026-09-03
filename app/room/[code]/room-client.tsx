@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  ArrowUp,
   Check,
   CircleAlert,
   CircleDot,
@@ -12,7 +13,6 @@ import {
   RotateCcw,
   ShieldCheck,
   Snail,
-  Smartphone,
   Star,
   Trophy,
   UserRound,
@@ -27,8 +27,11 @@ import {
   GAME_CONFIG,
   LEGACY_STARTING_LIVES,
   POWER_UP_CONFIG,
+  nearestAvailablePlayerHue,
+  nearestPlayerHueSlot,
   normalizePlayerHue,
   playerColorFromHue,
+  playerHueFromColor,
 } from "@/lib/game/config";
 import {
   AIR_MOUSE_CONFIG,
@@ -348,6 +351,29 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     playerHueRef.current = nextHue;
     setPlayerHue(nextHue);
     localStorage.setItem("cursor-tag-player-hue", String(nextHue));
+    return nextHue;
+  }
+
+  function syncPlayerHue(value: number) {
+    const unavailableHues = new Set(
+      snapshotRef.current.players
+        .filter((candidate) => candidate.id !== playerIdRef.current)
+        .map((candidate) => playerHueFromColor(candidate.color))
+        .filter((hue): hue is number => hue !== null)
+        .map(nearestPlayerHueSlot),
+    );
+    const nextHue = chooseHue(
+      nearestAvailablePlayerHue(value, unavailableHues),
+    );
+    if (!joinedRef.current || !nicknameRef.current) return;
+    socketRef.current?.send({
+      type: "join",
+      payload: {
+        name: nicknameRef.current,
+        hue: nextHue,
+        calibrated: calibratedRef.current,
+      },
+    });
   }
 
   async function enableMotionAgain() {
@@ -428,6 +454,15 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   }
 
   const player = snapshot.players.find((candidate) => candidate.id === playerId);
+  const assignedPlayerHue = playerHueFromColor(player?.color ?? "");
+
+  useEffect(() => {
+    if (assignedPlayerHue === null || assignedPlayerHue === playerHueRef.current) return;
+    playerHueRef.current = assignedPlayerHue;
+    setPlayerHue(assignedPlayerHue);
+    localStorage.setItem("cursor-tag-player-hue", String(assignedPlayerHue));
+  }, [assignedPlayerHue]);
+
   const selectedColor = playerColorFromHue(playerHue);
   const isIt = snapshot.itPlayerId === playerId;
   const isProtected = Boolean(
@@ -470,29 +505,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               <UserRound className="size-5 text-white/35" />
               <input id="nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={18} autoComplete="nickname" placeholder="e.g. Speedy Sam" className="min-w-0 flex-1 bg-transparent px-3 font-bold text-white outline-none placeholder:text-white/25" />
             </div>
-            <div className="mt-5 rounded-2xl border border-white/8 bg-black/20 p-4">
-              <div className="flex items-center gap-4">
-                <span className="grid size-16 shrink-0 place-items-center rounded-full border-[5px] border-white shadow-[0_8px_30px_rgba(0,0,0,.35)]" style={{ backgroundColor: selectedColor }} aria-hidden="true">
-                  <span className="size-2 rounded-full bg-white" />
-                </span>
-                <div className="min-w-0 flex-1 text-left">
-                  <label htmlFor="player-hue" className="block text-xs font-black uppercase tracking-[.16em] text-white/45">Your cursor color</label>
-                  <p className="mt-1 text-xl font-black" style={{ color: selectedColor }}>THIS IS YOU</p>
-                  <p className="font-mono text-[11px] font-bold text-white/35">Hue {playerHue}°</p>
-                </div>
-              </div>
-              <input
-                id="player-hue"
-                type="range"
-                min="0"
-                max="359"
-                value={playerHue}
-                onChange={(event) => chooseHue(Number(event.target.value))}
-                aria-label={`Cursor hue ${playerHue} degrees`}
-                className="hue-slider mt-4 w-full"
-                style={{ accentColor: selectedColor, color: selectedColor }}
-              />
-            </div>
+            <PlayerColorWheel
+              hue={playerHue}
+              color={selectedColor}
+              onChange={chooseHue}
+            />
             <button type="submit" disabled={!nickname.trim() || status !== "connected" || !snapshot.hostConnected || sensorStatus === "requesting"} className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_6px_0_#648d20] active:translate-y-1 active:shadow-[0_2px_0_#648d20] disabled:bg-white/8 disabled:text-white/25 disabled:shadow-none">
               {sensorStatus === "requesting" ? <LoaderCircle className="size-5 animate-spin" /> : <Move3d className="size-5" />}
               {sensorStatus === "requesting" ? "Requesting motion…" : !snapshot.hostConnected ? "Waiting for host" : "Enable motion & join"}
@@ -517,15 +534,16 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           </div>
 
           {calibrationStep === "aim" ? <>
-            <div className="relative grid h-28 w-44 place-items-center rounded-[2rem] border border-white/10 bg-[#191c18] shadow-[0_18px_55px_rgba(0,0,0,.3)]">
-              <div className="calibration-preview-target grid size-12 place-items-center rounded-full border border-[#b7ff45]/70">
-                <span className="size-2.5 rounded-full bg-[#b7ff45] shadow-[0_0_14px_#b7ff45]" />
+            <div className="calibration-phone relative flex h-36 w-22 flex-col items-center rounded-[1.7rem] border-4 border-white bg-[#191c18] px-3 py-3 shadow-[0_18px_55px_rgba(0,0,0,.35)]">
+              <span className="h-1 w-8 rounded-full bg-white/25" />
+              <div className="mt-3 grid flex-1 place-items-center">
+                <ArrowUp className="size-12 text-[#b7ff45] drop-shadow-[0_0_12px_rgba(183,255,69,.55)]" strokeWidth={3.5} />
               </div>
-              <Smartphone className="calibration-phone absolute -bottom-4 -right-1 size-12 rotate-[-12deg] text-white" />
+              <span className="font-mono text-[8px] font-black uppercase tracking-[.16em] text-white/35">Point this way</span>
             </div>
             <span className="phone-eyebrow mt-8">Step 1 of 3</span>
-            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">AIM AT<br />THE DOT.</h1>
-            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Find the small lime dot in the middle of the big screen. Hold your phone like a remote and point its top edge at it.</p>
+            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">POINT THE ARROW<br />AT THE DOT.</h1>
+            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Hold your phone like a remote and aim the arrow at the lime dot in the middle of the big screen.</p>
             {sensorStatus !== "active" ? (
               <button type="button" onClick={() => void enableMotionAgain()} className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#7c5cff] font-black text-white shadow-[0_7px_0_#4935a5]"><Move3d className="size-5" /> Enable motion</button>
             ) : (
@@ -576,6 +594,13 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <h1 className="mt-3 text-4xl font-black tracking-[-.05em]">YOU’RE IN, {nickname.toUpperCase()}.</h1>
           <p className="mt-4 max-w-xs text-white/50">Move your phone now—your cursor is already live in the warm-up arena on the big screen.</p>
           <SharedGameSettings snapshot={snapshot} />
+          <PlayerColorWheel
+            compact
+            hue={playerHue}
+            color={player?.color ?? selectedColor}
+            onChange={chooseHue}
+            onCommit={syncPlayerHue}
+          />
           <div className="mt-7 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm"><Move3d className="size-4 text-[#9b87ff]" /> Warm up while others join</div>
         </div>
       </PhoneShell>
@@ -587,6 +612,9 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       <div className="flex flex-1 flex-col py-6">
         <div className={`relative flex flex-1 flex-col items-center justify-center overflow-hidden rounded-[2.25rem] border text-center shadow-xl ${isIt ? "border-[#ff5c5c]/30 bg-[#ff5c5c] text-white" : "border-white/10 bg-[#191c18] text-white"}`}>
           <div className="controller-rings absolute inset-0 opacity-25" />
+          <div className="absolute inset-x-0 top-5 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-[.14em] text-white/55">
+            <ArrowUp className="size-4" strokeWidth={3} /> Point this arrow at the big screen
+          </div>
           <div className="relative grid size-28 place-items-center rounded-full border-[8px] border-white shadow-[0_16px_45px_rgba(0,0,0,.3)]" style={{ backgroundColor: player?.color ?? "#b7ff45" }} role="img" aria-label={isIt ? "You are it" : "Your cursor"}>
             {isIt ? <Star className="size-14 fill-white text-white" strokeWidth={2.4} /> : <span className="size-3 rounded-full bg-white" />}
             {isProtected && <span className="absolute -right-2 -top-2 grid size-9 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-lg"><ShieldCheck className="size-5" /></span>}
@@ -594,13 +622,111 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <p className="relative mt-8 font-mono text-sm font-black uppercase tracking-[.14em] text-white/65">{player?.score ?? 0} points</p>
           <p className="relative mt-3 text-xs font-black uppercase tracking-[.22em] text-white/55">Round {snapshot.round} / {snapshot.maxRounds}</p>
           <h1 className="relative mt-2 text-5xl font-black leading-[.9] tracking-[-.06em]">{isProtected ? "GET READY" : isIt ? "YOU’RE IT!" : "KEEP MOVING"}</h1>
-          <p className="relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed text-white/70">{isProtected ? "Your shield prevents an instant re-tag. Move clear!" : isIt ? "Pass it to someone for +1." : "Survive until time runs out for +1."}</p>
+          <p className="relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed text-white/70">{isProtected ? "Your shield prevents an instant re-tag. Move clear!" : isIt ? "You already earn +1. Catch someone for another +1." : "You already earn +1. Stay uncaught for another +1."}</p>
           {isProtected && <span className="relative mt-5 inline-flex items-center gap-2 rounded-full bg-white/18 px-4 py-2 text-xs font-black uppercase tracking-[.12em]"><ShieldCheck className="size-4" /> Tag shield</span>}
           {movementModifier && <span className={`relative mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[.12em] ${movementModifier === "boost" ? "bg-[#b7ff45] text-[#10120f]" : "bg-[#ff9f43] text-[#241302]"}`}>{movementModifier === "boost" ? <Zap className="size-5 fill-current" /> : <Snail className="size-5" />} {movementModifier === "boost" ? `Turbo ×${POWER_UP_CONFIG.boostMultiplier}` : `Slowed ×${POWER_UP_CONFIG.slowMultiplier}`}</span>}
         </div>
         <button type="button" onClick={recalibrateImmediately} disabled={!hasReading} className={`mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/55"}`}><RotateCcw className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`} /> {neutralReset ? "Neutral reset" : "Recalibrate instantly"}</button>
       </div>
     </PhoneShell>
+  );
+}
+
+function PlayerColorWheel({
+  hue,
+  color,
+  onChange,
+  onCommit,
+  compact = false,
+}: {
+  hue: number;
+  color: string;
+  onChange: (hue: number) => void;
+  onCommit?: (hue: number) => void;
+  compact?: boolean;
+}) {
+  const wheelRef = useRef<HTMLDivElement | null>(null);
+
+  function hueFromPointer(event: React.PointerEvent<HTMLDivElement>) {
+    const bounds = wheelRef.current?.getBoundingClientRect();
+    if (!bounds) return hue;
+    const x = event.clientX - (bounds.left + bounds.width / 2);
+    const y = event.clientY - (bounds.top + bounds.height / 2);
+    return normalizePlayerHue((Math.atan2(y, x) * 180) / Math.PI + 90);
+  }
+
+  function updateFromPointer(event: React.PointerEvent<HTMLDivElement>) {
+    const nextHue = hueFromPointer(event);
+    onChange(nextHue);
+    return nextHue;
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const direction =
+      event.key === "ArrowRight" || event.key === "ArrowUp"
+        ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowDown"
+          ? -1
+          : 0;
+    if (!direction) return;
+    event.preventDefault();
+    const nextHue = normalizePlayerHue(hue + direction * 5);
+    onChange(nextHue);
+    onCommit?.(nextHue);
+  }
+
+  const wheelSize = compact ? "size-28" : "size-34";
+  const markerRadius = compact ? 43 : 53;
+
+  return (
+    <div className="mt-5 w-full rounded-2xl border border-white/8 bg-black/20 p-4">
+      <div className={`flex items-center ${compact ? "gap-4" : "gap-5"}`}>
+        <div
+          ref={wheelRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Your cursor color"
+          aria-valuemin={0}
+          aria-valuemax={359}
+          aria-valuenow={hue}
+          className={`hue-wheel relative shrink-0 touch-none rounded-full outline-none focus-visible:ring-4 focus-visible:ring-white/30 ${wheelSize}`}
+          onKeyDown={handleKeyDown}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            updateFromPointer(event);
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              updateFromPointer(event);
+            }
+          }}
+          onPointerUp={(event) => {
+            const nextHue = updateFromPointer(event);
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            onCommit?.(nextHue);
+          }}
+        >
+          <span className="absolute inset-[18%] rounded-full border border-white/10 bg-[#151713] shadow-inner" />
+          <span
+            className="absolute left-1/2 top-1/2 grid size-7 place-items-center rounded-full border-4 border-white shadow-[0_4px_16px_rgba(0,0,0,.55)]"
+            style={{
+              backgroundColor: color,
+              transform: `translate(-50%, -50%) rotate(${hue}deg) translateY(-${markerRadius}px) rotate(-${hue}deg)`,
+            }}
+          >
+            <span className="size-1.5 rounded-full bg-white" />
+          </span>
+        </div>
+        <div className="min-w-0 flex-1 text-left">
+          <p className="text-xs font-black uppercase tracking-[.16em] text-white/45">Your cursor color</p>
+          <p className="mt-1 text-xl font-black" style={{ color }}>THIS IS YOU</p>
+          <p className="font-mono text-[11px] font-bold text-white/35">Hue {hue}°</p>
+          <p className="mt-2 text-[10px] font-semibold leading-snug text-white/35">
+            Drag the wheel. Taken shades shift to the nearest free color so every player stays unique.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
