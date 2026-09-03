@@ -38,8 +38,16 @@ import {
   calculateAirMouseAim,
   type AirMouseOrientation,
 } from "@/lib/input/airmouse";
-import { createRoomSocket, type RoomConnectionStatus, type RoomSocket } from "@/lib/realtime/room";
-import { normalizeRoomSnapshot, type RoomSnapshot, type ServerRoomMessage } from "@/lib/realtime/types";
+import {
+  createRoomSocket,
+  type RoomConnectionStatus,
+  type RoomSocket,
+} from "@/lib/realtime/room";
+import {
+  normalizeRoomSnapshot,
+  type RoomSnapshot,
+  type ServerRoomMessage,
+} from "@/lib/realtime/types";
 
 type SensorStatus = "idle" | "requesting" | "active" | "denied" | "unsupported";
 type CalibrationStep = "aim" | "steady" | "done";
@@ -96,7 +104,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [error, setError] = useState<string | null>(null);
   const [neutralReset, setNeutralReset] = useState(false);
   const [roomUnavailable, setRoomUnavailable] = useState(false);
-  const [calibrationStep, setCalibrationStep] = useState<CalibrationStep>("aim");
+  const [calibrationStep, setCalibrationStep] =
+    useState<CalibrationStep>("aim");
   const [calibrationCountdown, setCalibrationCountdown] = useState(3);
 
   const socketRef = useRef<RoomSocket | null>(null);
@@ -120,9 +129,13 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     snapshotRef.current = snapshot;
   }, [snapshot]);
 
-  useEffect(() => () => {
-    for (const timer of calibrationTimersRef.current) window.clearTimeout(timer);
-  }, []);
+  useEffect(
+    () => () => {
+      for (const timer of calibrationTimersRef.current)
+        window.clearTimeout(timer);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (sensorStatus !== "idle") return;
@@ -131,7 +144,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         setSensorStatus("unsupported");
         return;
       }
-      const orientation = DeviceOrientationEvent as PermissionCapableOrientation;
+      const orientation =
+        DeviceOrientationEvent as PermissionCapableOrientation;
       if (typeof orientation.requestPermission !== "function") {
         setSensorStatus("active");
       }
@@ -144,9 +158,12 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     playerIdRef.current = id;
     const storedName = localStorage.getItem("cursor-tag-nickname") ?? "";
     const storedHue = normalizePlayerHue(
-      Number(localStorage.getItem("cursor-tag-player-hue") ?? DEFAULT_PLAYER_HUE),
+      Number(
+        localStorage.getItem("cursor-tag-player-hue") ?? DEFAULT_PLAYER_HUE,
+      ),
     );
-    const wasJoined = sessionStorage.getItem(`cursor-tag-joined-${roomCode}`) === "true";
+    const wasJoined =
+      sessionStorage.getItem(`cursor-tag-joined-${roomCode}`) === "true";
     nicknameRef.current = storedName;
     playerHueRef.current = storedHue;
     joinedRef.current = wasJoined;
@@ -163,7 +180,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         roomClosedRef.current = true;
         joinedRef.current = false;
         sessionStorage.removeItem(`cursor-tag-joined-${roomCode}`);
-        for (const timer of calibrationTimersRef.current) window.clearTimeout(timer);
+        for (const timer of calibrationTimersRef.current)
+          window.clearTimeout(timer);
         calibrationTimersRef.current = [];
         setStatus("error");
         setRoomUnavailable(true);
@@ -183,7 +201,12 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         setNow(Date.now());
       }
       if (message.type === "pong") {
-        setLatencyMs(Math.max(0, Math.round(performance.now() - message.payload.clientSentAt)));
+        setLatencyMs(
+          Math.max(
+            0,
+            Math.round(performance.now() - message.payload.clientSentAt),
+          ),
+        );
       }
       if (message.type === "error") setError(message.message);
     }
@@ -225,16 +248,28 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   )?.movementModifierUntil;
 
   useEffect(() => {
-    if ((!snapshot.invulnerableUntil && !localShieldUntil && !localMovementUntil) || snapshot.phase !== "playing") return;
+    if (
+      (!snapshot.invulnerableUntil &&
+        !localShieldUntil &&
+        !localMovementUntil) ||
+      snapshot.phase !== "playing"
+    )
+      return;
     const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
-  }, [localMovementUntil, localShieldUntil, snapshot.invulnerableUntil, snapshot.phase]);
+  }, [
+    localMovementUntil,
+    localShieldUntil,
+    snapshot.invulnerableUntil,
+    snapshot.phase,
+  ]);
 
   useEffect(() => {
     if (sensorStatus !== "active") return;
 
     function handleOrientation(event: DeviceOrientationEvent) {
-      if (typeof event.alpha !== "number" || typeof event.beta !== "number") return;
+      if (typeof event.alpha !== "number" || typeof event.beta !== "number")
+        return;
       const current = { alpha: event.alpha, beta: event.beta };
       currentReadingRef.current = current;
       if (!hasReadingRef.current) {
@@ -243,12 +278,18 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       }
 
       const origin = originRef.current;
-      if (!origin || !calibratedRef.current || snapshotRef.current.phase === "finished") return;
+      if (
+        !origin ||
+        !calibratedRef.current ||
+        snapshotRef.current.phase === "finished"
+      )
+        return;
       const localPlayer = snapshotRef.current.players.find(
         (candidate) => candidate.id === playerIdRef.current,
       );
       const activeModifier =
-        localPlayer?.movementModifierUntil && Date.now() < localPlayer.movementModifierUntil
+        localPlayer?.movementModifierUntil &&
+        Date.now() < localPlayer.movementModifierUntil
           ? localPlayer.movementModifier
           : null;
       const movementMultiplier =
@@ -272,10 +313,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       smoothedAimRef.current = next;
 
       const sentAt = performance.now();
-      if (
-        sentAt - lastSentAtRef.current <
-        AIR_MOUSE_CONFIG.sendIntervalMs
-      ) {
+      if (sentAt - lastSentAtRef.current < AIR_MOUSE_CONFIG.sendIntervalMs) {
         return;
       }
       const last = lastSentAimRef.current;
@@ -300,8 +338,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       });
     }
 
-    window.addEventListener("deviceorientation", handleOrientation, { passive: true });
-    return () => window.removeEventListener("deviceorientation", handleOrientation);
+    window.addEventListener("deviceorientation", handleOrientation, {
+      passive: true,
+    });
+    return () =>
+      window.removeEventListener("deviceorientation", handleOrientation);
   }, [sensorStatus]);
 
   async function requestMotionAccess() {
@@ -311,7 +352,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     }
     setSensorStatus("requesting");
     try {
-      const orientation = DeviceOrientationEvent as PermissionCapableOrientation;
+      const orientation =
+        DeviceOrientationEvent as PermissionCapableOrientation;
       if (typeof orientation.requestPermission === "function") {
         const permission = await orientation.requestPermission();
         if (permission !== "granted") {
@@ -419,7 +461,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   async function keepScreenAwake() {
     try {
-      const wakeLock = (navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<unknown> } }).wakeLock;
+      const wakeLock = (
+        navigator as Navigator & {
+          wakeLock?: { request: (type: "screen") => Promise<unknown> };
+        }
+      ).wakeLock;
       await wakeLock?.request("screen");
     } catch {
       // Screen Wake Lock is a convenience, not a gameplay requirement.
@@ -453,11 +499,17 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     window.setTimeout(() => setNeutralReset(false), 1_200);
   }
 
-  const player = snapshot.players.find((candidate) => candidate.id === playerId);
+  const player = snapshot.players.find(
+    (candidate) => candidate.id === playerId,
+  );
   const assignedPlayerHue = playerHueFromColor(player?.color ?? "");
 
   useEffect(() => {
-    if (assignedPlayerHue === null || assignedPlayerHue === playerHueRef.current) return;
+    if (
+      assignedPlayerHue === null ||
+      assignedPlayerHue === playerHueRef.current
+    )
+      return;
     playerHueRef.current = assignedPlayerHue;
     setPlayerHue(assignedPlayerHue);
     localStorage.setItem("cursor-tag-player-hue", String(assignedPlayerHue));
@@ -470,7 +522,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       snapshot.protectedPlayerId === playerId &&
       snapshot.invulnerableUntil &&
       now < snapshot.invulnerableUntil) ||
-      (player?.shieldUntil && now < player.shieldUntil),
+    (player?.shieldUntil && now < player.shieldUntil),
   );
   const movementModifier =
     player?.movementModifierUntil && now < player.movementModifierUntil
@@ -481,11 +533,25 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     return (
       <PhoneShell roomCode={roomCode} status="error" latencyMs={null}>
         <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
-          <div className="grid size-20 place-items-center rounded-[1.7rem] border border-[#ff5c5c]/20 bg-[#ff5c5c]/10 text-[#ff9292]"><CircleAlert className="size-9" /></div>
+          <div className="grid size-20 place-items-center rounded-[1.7rem] border border-[#ff5c5c]/20 bg-[#ff5c5c]/10 text-[#ff9292]">
+            <CircleAlert className="size-9" />
+          </div>
           <span className="phone-eyebrow mt-7">Room {roomCode}</span>
-          <h1 className="mt-3 text-5xl font-black leading-[.92] tracking-[-.06em]">ROOM NOT<br />FOUND.</h1>
-          <p className="mt-4 max-w-xs text-white/50">This room isn’t open. Check the code, or ask the host to start a new room.</p>
-          <Link href="/" className="mt-8 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_6px_0_#648d20]"><ArrowRight className="size-4 rotate-180" /> Back to home</Link>
+          <h1 className="mt-3 text-5xl font-black leading-[.92] tracking-[-.06em]">
+            ROOM NOT
+            <br />
+            FOUND.
+          </h1>
+          <p className="mt-4 max-w-xs text-white/50">
+            This room isn't open. Check the code, or ask the host to start a new
+            room.
+          </p>
+          <Link
+            href="/"
+            className="mt-8 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_6px_0_#648d20]"
+          >
+            <ArrowRight className="size-4 rotate-180" /> Back to home
+          </Link>
         </div>
       </PhoneShell>
     );
@@ -493,30 +559,81 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (!joined) {
     return (
-      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={selectedColor}>
+      <PhoneShell
+        roomCode={roomCode}
+        status={status}
+        latencyMs={latencyMs}
+        color={selectedColor}
+      >
         <div className="flex flex-1 flex-col justify-center py-6 sm:py-8">
-          <span className="phone-eyebrow">Room {roomCode}</span>
-          <h1 className="mt-4 text-[2.7rem] font-black leading-[.92] tracking-[-.06em] sm:text-5xl">PICK A NAME.<br /><span style={{ color: selectedColor }}>PICK YOUR COLOR.</span></h1>
-          <p className="mt-4 text-sm leading-relaxed text-white/50 sm:text-base">This color is your cursor on the big screen. Drag the hue until it feels unmistakably yours.</p>
-          <SharedGameSettings snapshot={snapshot} />
-          <form onSubmit={joinRoom} className="mt-6 rounded-[1.75rem] border border-white/10 bg-[#191c18] p-5 shadow-[0_20px_70px_rgba(0,0,0,.35)]">
-            <label htmlFor="nickname" className="text-sm font-black">Your name</label>
+          <h1 className="mt-4 text-[2.7rem] font-black leading-[.92] tracking-[-.06em] sm:text-5xl">
+            PICK A NAME.
+            <br />
+            <span style={{ color: selectedColor }}>PICK YOUR COLOR.</span>
+          </h1>
+          <p className="mt-4 text-sm leading-relaxed text-white/50 sm:text-base">
+            This color is your cursor on the big screen. Drag the hue until it
+            feels unmistakably yours.
+          </p>
+          {/* <SharedGameSettings snapshot={snapshot} /> */}
+          <form
+            onSubmit={joinRoom}
+            className="mt-6 rounded-[1.75rem] border border-white/10 bg-[#191c18] p-5 shadow-[0_20px_70px_rgba(0,0,0,.35)]"
+          >
+            <label htmlFor="nickname" className="text-sm font-black">
+              Your name
+            </label>
             <div className="mt-2 flex h-14 items-center rounded-2xl border border-white/8 bg-white/[.055] px-4 focus-within:ring-4 focus-within:ring-[#7c5cff]/20">
               <UserRound className="size-5 text-white/35" />
-              <input id="nickname" value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={18} autoComplete="nickname" placeholder="e.g. Speedy Sam" className="min-w-0 flex-1 bg-transparent px-3 font-bold text-white outline-none placeholder:text-white/25" />
+              <input
+                id="nickname"
+                value={nickname}
+                onChange={(event) => setNickname(event.target.value)}
+                maxLength={18}
+                autoComplete="nickname"
+                placeholder="e.g. Speedy Sam"
+                className="min-w-0 flex-1 bg-transparent px-3 font-bold text-white outline-none placeholder:text-white/25"
+              />
             </div>
             <PlayerColorWheel
+              compact
               hue={playerHue}
-              color={selectedColor}
+              color={player?.color ?? selectedColor}
               onChange={chooseHue}
+              onCommit={syncPlayerHue}
             />
-            <button type="submit" disabled={!nickname.trim() || status !== "connected" || !snapshot.hostConnected || sensorStatus === "requesting"} className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_6px_0_#648d20] active:translate-y-1 active:shadow-[0_2px_0_#648d20] disabled:bg-white/8 disabled:text-white/25 disabled:shadow-none">
-              {sensorStatus === "requesting" ? <LoaderCircle className="size-5 animate-spin" /> : <Move3d className="size-5" />}
-              {sensorStatus === "requesting" ? "Requesting motion…" : !snapshot.hostConnected ? "Waiting for host" : "Enable motion & join"}
-              {sensorStatus !== "requesting" && <ArrowRight className="size-4" />}
+            <button
+              type="submit"
+              disabled={
+                !nickname.trim() ||
+                status !== "connected" ||
+                !snapshot.hostConnected ||
+                sensorStatus === "requesting"
+              }
+              className="mt-4 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_6px_0_#648d20] active:translate-y-1 active:shadow-[0_2px_0_#648d20] disabled:bg-white/8 disabled:text-white/25 disabled:shadow-none"
+            >
+              {sensorStatus === "requesting" ? (
+                <LoaderCircle className="size-5 animate-spin" />
+              ) : (
+                <Move3d className="size-5" />
+              )}
+              {sensorStatus === "requesting"
+                ? "Requesting motion…"
+                : !snapshot.hostConnected
+                  ? "Waiting for host"
+                  : "Enable motion & join"}
+              {sensorStatus !== "requesting" && (
+                <ArrowRight className="size-4" />
+              )}
             </button>
-            {(sensorStatus === "denied" || sensorStatus === "unsupported") && <MotionError status={sensorStatus} />}
-            {error && <p className="mt-3 rounded-xl border border-[#ff5c5c]/20 bg-[#ff5c5c]/10 px-3 py-2 text-xs font-bold text-[#ff9292]">{error}</p>}
+            {(sensorStatus === "denied" || sensorStatus === "unsupported") && (
+              <MotionError status={sensorStatus} />
+            )}
+            {error && (
+              <p className="mt-3 rounded-xl border border-[#ff5c5c]/20 bg-[#ff5c5c]/10 px-3 py-2 text-xs font-bold text-[#ff9292]">
+                {error}
+              </p>
+            )}
           </form>
         </div>
       </PhoneShell>
@@ -525,48 +642,132 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (sensorStatus !== "active" || !calibrated) {
     return (
-      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={player?.color}>
+      <PhoneShell
+        roomCode={roomCode}
+        status={status}
+        latencyMs={latencyMs}
+        color={player?.color}
+      >
         <div className="flex flex-1 flex-col items-center justify-center py-8 text-center">
-          <div className="mb-7 grid w-full max-w-sm grid-cols-3 gap-2" aria-label="Calibration progress">
-            <CalibrationStepPill number="1" label="Aim" state={calibrationStep === "aim" ? "active" : "complete"} />
-            <CalibrationStepPill number="2" label="Hold" state={calibrationStep === "steady" ? "active" : calibrationStep === "done" ? "complete" : "upcoming"} />
-            <CalibrationStepPill number="3" label="Ready" state={calibrationStep === "done" ? "active" : "upcoming"} />
+          <div
+            className="mb-7 grid w-full max-w-sm grid-cols-3 gap-2"
+            aria-label="Calibration progress"
+          >
+            <CalibrationStepPill
+              number="1"
+              label="Aim"
+              state={calibrationStep === "aim" ? "active" : "complete"}
+            />
+            <CalibrationStepPill
+              number="2"
+              label="Hold"
+              state={
+                calibrationStep === "steady"
+                  ? "active"
+                  : calibrationStep === "done"
+                    ? "complete"
+                    : "upcoming"
+              }
+            />
+            <CalibrationStepPill
+              number="3"
+              label="Ready"
+              state={calibrationStep === "done" ? "active" : "upcoming"}
+            />
           </div>
 
-          {calibrationStep === "aim" ? <>
-            <div className="calibration-phone relative flex h-36 w-22 flex-col items-center rounded-[1.7rem] border-4 border-white bg-[#191c18] px-3 py-3 shadow-[0_18px_55px_rgba(0,0,0,.35)]">
-              <span className="h-1 w-8 rounded-full bg-white/25" />
-              <div className="mt-3 grid flex-1 place-items-center">
-                <ArrowUp className="size-12 text-[#b7ff45] drop-shadow-[0_0_12px_rgba(183,255,69,.55)]" strokeWidth={3.5} />
+          {calibrationStep === "aim" ? (
+            <>
+              <div className="calibration-phone relative flex h-36 w-22 flex-col items-center rounded-[1.7rem] border-4 border-white bg-[#191c18] px-3 py-3 shadow-[0_18px_55px_rgba(0,0,0,.35)]">
+                <span className="h-1 w-8 rounded-full bg-white/25" />
+                <div className="mt-3 grid flex-1 place-items-center">
+                  <ArrowUp
+                    className="size-12 text-[#b7ff45] drop-shadow-[0_0_12px_rgba(183,255,69,.55)]"
+                    strokeWidth={3.5}
+                  />
+                </div>
+                <span className="font-mono text-[8px] font-black uppercase tracking-[.16em] text-white/35">
+                  Point this way
+                </span>
               </div>
-              <span className="font-mono text-[8px] font-black uppercase tracking-[.16em] text-white/35">Point this way</span>
-            </div>
-            <span className="phone-eyebrow mt-8">Step 1 of 3</span>
-            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">POINT THE ARROW<br />AT THE DOT.</h1>
-            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Hold your phone like a remote and aim the arrow at the lime dot in the middle of the big screen.</p>
-            {sensorStatus !== "active" ? (
-              <button type="button" onClick={() => void enableMotionAgain()} className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#7c5cff] font-black text-white shadow-[0_7px_0_#4935a5]"><Move3d className="size-5" /> Enable motion</button>
-            ) : (
-              <button type="button" onClick={beginSteadyCalibration} disabled={!hasReading} className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_7px_0_#789f35] active:translate-y-1 active:shadow-[0_2px_0_#789f35] disabled:opacity-40 disabled:shadow-none">
-                {hasReading ? <CircleDot className="size-5" /> : <LoaderCircle className="size-5 animate-spin" />}
-                {hasReading ? "I’m aiming at the dot" : "Reading sensors…"}
-              </button>
-            )}
-          </> : calibrationStep === "steady" ? <>
-            <div className="grid size-28 place-items-center rounded-full border border-[#b7ff45]/35 bg-[#b7ff45]/10 shadow-[0_0_45px_rgba(183,255,69,.16)]" aria-live="polite">
-              <span className="font-mono text-6xl font-black tabular-nums text-[#b7ff45]">{calibrationCountdown}</span>
-            </div>
-            <span className="phone-eyebrow mt-8">Step 2 of 3</span>
-            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">HOLD<br />STEADY.</h1>
-            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Keep pointing at the dot. Your center position locks automatically when the countdown ends.</p>
-            <div className="mt-7 flex items-center gap-2 rounded-full border border-[#b7ff45]/20 bg-[#b7ff45]/8 px-4 py-2.5 text-sm font-black text-[#b7ff45]"><LoaderCircle className="size-4 animate-spin" /> Locking your center…</div>
-          </> : <>
-            <div className="grid size-28 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-[0_0_45px_rgba(183,255,69,.28)]"><Check className="size-14" strokeWidth={3} /></div>
-            <span className="phone-eyebrow mt-8">Step 3 of 3</span>
-            <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">CENTER<br />LOCKED.</h1>
-            <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">Done. Your cursor will start in the middle of the big screen.</p>
-          </>}
-          {(sensorStatus === "denied" || sensorStatus === "unsupported") && <MotionError status={sensorStatus} />}
+              <span className="phone-eyebrow mt-4">Step 1 of 3</span>
+              <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">
+                POINT THE ARROW
+                <br />
+                AT THE DOT.
+              </h1>
+              <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">
+                Hold your phone like a remote and aim the arrow at the lime dot
+                in the middle of the big screen.
+              </p>
+              {sensorStatus !== "active" ? (
+                <button
+                  type="button"
+                  onClick={() => void enableMotionAgain()}
+                  className="mt-4 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#7c5cff] font-black text-white shadow-[0_7px_0_#4935a5]"
+                >
+                  <Move3d className="size-5" /> Enable motion
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={beginSteadyCalibration}
+                  disabled={!hasReading}
+                  className="mt-8 flex h-15 w-full items-center justify-center gap-2 rounded-2xl bg-[#b7ff45] font-black text-[#10120f] shadow-[0_7px_0_#789f35] active:translate-y-1 active:shadow-[0_2px_0_#789f35] disabled:opacity-40 disabled:shadow-none"
+                >
+                  {hasReading ? (
+                    <CircleDot className="size-5" />
+                  ) : (
+                    <LoaderCircle className="size-5 animate-spin" />
+                  )}
+                  {hasReading ? "Im aiming at the dot" : "Reading sensors…"}
+                </button>
+              )}
+            </>
+          ) : calibrationStep === "steady" ? (
+            <>
+              <div
+                className="grid size-28 place-items-center rounded-full border border-[#b7ff45]/35 bg-[#b7ff45]/10 shadow-[0_0_45px_rgba(183,255,69,.16)]"
+                aria-live="polite"
+              >
+                <span className="font-mono text-6xl font-black tabular-nums text-[#b7ff45]">
+                  {calibrationCountdown}
+                </span>
+              </div>
+              <span className="phone-eyebrow mt-8">Step 2 of 3</span>
+              <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">
+                HOLD
+                <br />
+                STEADY.
+              </h1>
+              <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">
+                Keep pointing at the dot. Your center position locks
+                automatically when the countdown ends.
+              </p>
+              <div className="mt-7 flex items-center gap-2 rounded-full border border-[#b7ff45]/20 bg-[#b7ff45]/8 px-4 py-2.5 text-sm font-black text-[#b7ff45]">
+                <LoaderCircle className="size-4 animate-spin" /> Locking your
+                center…
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid size-28 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-[0_0_45px_rgba(183,255,69,.28)]">
+                <Check className="size-14" strokeWidth={3} />
+              </div>
+              <span className="phone-eyebrow mt-8">Step 3 of 3</span>
+              <h1 className="mt-3 text-4xl font-black leading-[.96] tracking-[-.055em]">
+                CENTER
+                <br />
+                LOCKED.
+              </h1>
+              <p className="mt-4 max-w-xs font-semibold leading-relaxed text-white/55">
+                Done. Your cursor will start in the middle of the big screen.
+              </p>
+            </>
+          )}
+          {(sensorStatus === "denied" || sensorStatus === "unsupported") && (
+            <MotionError status={sensorStatus} />
+          )}
         </div>
       </PhoneShell>
     );
@@ -574,12 +775,21 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (snapshot.phase === "finished") {
     return (
-      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={player?.color}>
+      <PhoneShell
+        roomCode={roomCode}
+        status={status}
+        latencyMs={latencyMs}
+        color={player?.color}
+      >
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <Trophy className="size-16 text-[#9b87ff]" />
           <span className="phone-eyebrow mt-6">Game over</span>
-          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">{player?.score ?? 0} POINTS</h1>
-          <p className="mt-3 text-white/50">Check the big screen for the final ranking.</p>
+          <h1 className="mt-3 text-5xl font-black tracking-[-.06em]">
+            {player?.score ?? 0} POINTS
+          </h1>
+          <p className="mt-3 text-white/50">
+            Check the big screen for the final ranking.
+          </p>
         </div>
       </PhoneShell>
     );
@@ -587,13 +797,26 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (snapshot.phase === "lobby" || !snapshot.itPlayerId) {
     return (
-      <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={player?.color}>
+      <PhoneShell
+        roomCode={roomCode}
+        status={status}
+        latencyMs={latencyMs}
+        color={player?.color}
+      >
         <div className="flex flex-1 flex-col items-center justify-center text-center">
-          <div className="grid size-24 place-items-center rounded-[2rem] text-4xl font-black text-[#10120f] shadow-xl" style={{ backgroundColor: player?.color ?? "#b7ff45" }}>{nickname.charAt(0).toUpperCase()}</div>
-          <span className="phone-eyebrow mt-7">Calibrated & ready</span>
-          <h1 className="mt-3 text-4xl font-black tracking-[-.05em]">YOU’RE IN, {nickname.toUpperCase()}.</h1>
-          <p className="mt-4 max-w-xs text-white/50">Move your phone now—your cursor is already live in the warm-up arena on the big screen.</p>
-          <SharedGameSettings snapshot={snapshot} />
+          <div
+            className="grid size-24 place-items-center rounded-[2rem] text-4xl font-black text-[#10120f] shadow-xl"
+            style={{ backgroundColor: player?.color ?? "#b7ff45" }}
+          >
+            {nickname.charAt(0).toUpperCase()}
+          </div>
+          <h1 className="mt-3 text-4xl font-black tracking-[-.05em]">
+            YOU'RE IN, {nickname.toUpperCase()}.
+          </h1>
+          <p className="mt-4 max-w-xs text-white/50">
+            Move your phone now—your cursor is already live in the warm-up arena
+            on the big screen.
+          </p>
           <PlayerColorWheel
             compact
             hue={playerHue}
@@ -601,33 +824,122 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             onChange={chooseHue}
             onCommit={syncPlayerHue}
           />
-          <button type="button" onClick={recalibrateImmediately} disabled={!hasReading} className={`mt-4 flex h-13 w-full max-w-sm items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/65"}`}><RotateCcw className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`} /> {neutralReset ? "Center recalibrated" : "Recalibrate center"}</button>
-          <div className="mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm"><Move3d className="size-4 text-[#9b87ff]" /> Warm up while others join</div>
+          <button
+            type="button"
+            onClick={() => {
+              setCalibrated(false);
+              setCalibrationStep("aim");
+              calibratedRef.current = false;
+              socketRef.current?.send({
+                type: "join",
+                payload: {
+                  name: nicknameRef.current,
+                  hue: playerHueRef.current,
+                  calibrated: calibratedRef.current,
+                },
+              });
+              void enableMotionAgain();
+            }}
+            disabled={!hasReading}
+            className={`mt-4 flex h-13 w-full max-w-sm items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/65"}`}
+          >
+            <RotateCcw
+              className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`}
+            />{" "}
+            {neutralReset ? "Center recalibrated" : "Recalibrate center"}
+          </button>
+          <div className="my-4 flex items-center gap-2 rounded-full border border-white/10 bg-white/[.055] px-4 py-2.5 text-sm font-black shadow-sm">
+            <Move3d className="size-4 text-[#9b87ff]" /> Warm up while others
+            join
+          </div>
         </div>
       </PhoneShell>
     );
   }
 
   return (
-    <PhoneShell roomCode={roomCode} status={status} latencyMs={latencyMs} color={player?.color}>
+    <PhoneShell
+      roomCode={roomCode}
+      status={status}
+      latencyMs={latencyMs}
+      color={player?.color}
+    >
       <div className="flex flex-1 flex-col py-6">
-        <div className={`relative flex flex-1 flex-col items-center justify-center overflow-hidden rounded-[2.25rem] border text-center shadow-xl ${isIt ? "border-[#ff5c5c]/30 bg-[#ff5c5c] text-white" : "border-white/10 bg-[#191c18] text-white"}`}>
+        <div
+          className={`relative flex flex-1 flex-col items-center justify-center overflow-hidden rounded-[2.25rem] border text-center shadow-xl ${isIt ? "border-[#ff5c5c]/30 bg-[#ff5c5c] text-white" : "border-white/10 bg-[#191c18] text-white"}`}
+        >
           <div className="controller-rings absolute inset-0 opacity-25" />
           <div className="absolute inset-x-0 top-5 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-[.14em] text-white/55">
-            <ArrowUp className="size-4" strokeWidth={3} /> Point this arrow at the big screen
+            <ArrowUp className="size-4" strokeWidth={3} /> Point this arrow at
+            the big screen
           </div>
-          <div className="relative grid size-28 place-items-center rounded-full border-[8px] border-white shadow-[0_16px_45px_rgba(0,0,0,.3)]" style={{ backgroundColor: player?.color ?? "#b7ff45" }} role="img" aria-label={isIt ? "You are it" : "Your cursor"}>
-            {isIt ? <Star className="size-14 fill-white text-white" strokeWidth={2.4} /> : <span className="size-3 rounded-full bg-white" />}
-            {isProtected && <span className="absolute -right-2 -top-2 grid size-9 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-lg"><ShieldCheck className="size-5" /></span>}
+          <div
+            className="relative grid size-28 place-items-center rounded-full border-[8px] border-white shadow-[0_16px_45px_rgba(0,0,0,.3)]"
+            style={{ backgroundColor: player?.color ?? "#b7ff45" }}
+            role="img"
+            aria-label={isIt ? "You are it" : "Your cursor"}
+          >
+            {isIt ? (
+              <Star
+                className="size-14 fill-white text-white"
+                strokeWidth={2.4}
+              />
+            ) : (
+              <span className="size-3 rounded-full bg-white" />
+            )}
+            {isProtected && (
+              <span className="absolute -right-2 -top-2 grid size-9 place-items-center rounded-full bg-[#b7ff45] text-[#10120f] shadow-lg">
+                <ShieldCheck className="size-5" />
+              </span>
+            )}
           </div>
-          <p className="relative mt-8 font-mono text-sm font-black uppercase tracking-[.14em] text-white/65">{player?.score ?? 0} points</p>
-          <p className="relative mt-3 text-xs font-black uppercase tracking-[.22em] text-white/55">Round {snapshot.round} / {snapshot.maxRounds}</p>
-          <h1 className="relative mt-2 text-5xl font-black leading-[.9] tracking-[-.06em]">{isProtected ? "GET READY" : isIt ? "YOU’RE IT!" : "KEEP MOVING"}</h1>
-          <p className="relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed text-white/70">{isProtected ? "Your shield prevents an instant re-tag. Move clear!" : isIt ? "You already earn +1. Catch someone for another +1." : "You already earn +1. Stay uncaught for another +1."}</p>
-          {isProtected && <span className="relative mt-5 inline-flex items-center gap-2 rounded-full bg-white/18 px-4 py-2 text-xs font-black uppercase tracking-[.12em]"><ShieldCheck className="size-4" /> Tag shield</span>}
-          {movementModifier && <span className={`relative mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[.12em] ${movementModifier === "boost" ? "bg-[#b7ff45] text-[#10120f]" : "bg-[#ff9f43] text-[#241302]"}`}>{movementModifier === "boost" ? <Zap className="size-5 fill-current" /> : <Snail className="size-5" />} {movementModifier === "boost" ? `Turbo ×${POWER_UP_CONFIG.boostMultiplier}` : `Slowed ×${POWER_UP_CONFIG.slowMultiplier}`}</span>}
+          <p className="relative mt-8 font-mono text-sm font-black uppercase tracking-[.14em] text-white/65">
+            {player?.score ?? 0} points
+          </p>
+          <p className="relative mt-3 text-xs font-black uppercase tracking-[.22em] text-white/55">
+            Round {snapshot.round} / {snapshot.maxRounds}
+          </p>
+          <h1 className="relative mt-2 text-5xl font-black leading-[.9] tracking-[-.06em]">
+            {isProtected ? "GET READY" : isIt ? "YOU'RE IT!" : "KEEP MOVING"}
+          </h1>
+          <p className="relative mt-4 max-w-[270px] text-sm font-semibold leading-relaxed text-white/70">
+            {isProtected
+              ? "Your shield prevents an instant re-tag. Move clear!"
+              : isIt
+                ? "You already earn +1. Catch someone for another +1."
+                : "You already earn +1. Stay uncaught for another +1."}
+          </p>
+          {isProtected && (
+            <span className="relative mt-5 inline-flex items-center gap-2 rounded-full bg-white/18 px-4 py-2 text-xs font-black uppercase tracking-[.12em]">
+              <ShieldCheck className="size-4" /> Tag shield
+            </span>
+          )}
+          {movementModifier && (
+            <span
+              className={`relative mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[.12em] ${movementModifier === "boost" ? "bg-[#b7ff45] text-[#10120f]" : "bg-[#ff9f43] text-[#241302]"}`}
+            >
+              {movementModifier === "boost" ? (
+                <Zap className="size-5 fill-current" />
+              ) : (
+                <Snail className="size-5" />
+              )}{" "}
+              {movementModifier === "boost"
+                ? `Turbo ×${POWER_UP_CONFIG.boostMultiplier}`
+                : `Slowed ×${POWER_UP_CONFIG.slowMultiplier}`}
+            </span>
+          )}
         </div>
-        <button type="button" onClick={recalibrateImmediately} disabled={!hasReading} className={`mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/55"}`}><RotateCcw className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`} /> {neutralReset ? "Neutral reset" : "Recalibrate instantly"}</button>
+        <button
+          type="button"
+          onClick={recalibrateImmediately}
+          disabled={!hasReading}
+          className={`mt-4 flex h-13 items-center justify-center gap-2 rounded-2xl border text-sm font-black active:scale-[.98] disabled:opacity-35 ${neutralReset ? "border-[#b7ff45]/30 bg-[#b7ff45]/12 text-[#b7ff45]" : "border-white/10 bg-white/[.055] text-white/55"}`}
+        >
+          <RotateCcw
+            className={`size-4 ${neutralReset ? "rotate-180 transition-transform" : ""}`}
+          />{" "}
+          {neutralReset ? "Neutral reset" : "Recalibrate instantly"}
+        </button>
       </div>
     </PhoneShell>
   );
@@ -719,11 +1031,18 @@ function PlayerColorWheel({
           </span>
         </div>
         <div className="min-w-0 flex-1 text-left">
-          <p className="text-xs font-black uppercase tracking-[.16em] text-white/45">Your cursor color</p>
-          <p className="mt-1 text-xl font-black" style={{ color }}>THIS IS YOU</p>
-          <p className="font-mono text-[11px] font-bold text-white/35">Hue {hue}°</p>
+          <p className="text-xs font-black uppercase tracking-[.16em] text-white/45">
+            Your cursor color
+          </p>
+          <p className="mt-1 text-xl font-black" style={{ color }}>
+            THIS IS YOU
+          </p>
+          <p className="font-mono text-[11px] font-bold text-white/35">
+            Hue {hue}°
+          </p>
           <p className="mt-2 text-[10px] font-semibold leading-snug text-white/35">
-            Drag the wheel. Taken shades shift to the nearest free color so every player stays unique.
+            Drag the wheel. Taken shades shift to the nearest free color so
+            every player stays unique.
           </p>
         </div>
       </div>
@@ -731,45 +1050,97 @@ function PlayerColorWheel({
   );
 }
 
-function SharedGameSettings({ snapshot }: { snapshot: RoomSnapshot }) {
-  return (
-    <div className="mt-5 w-full max-w-sm rounded-2xl border border-white/10 bg-white/[.045] p-3 text-left" aria-label="Game settings">
-      <p className="text-[10px] font-black uppercase tracking-[.14em] text-[#b7ff45]">Game settings</p>
-      <div className="mt-2 grid grid-cols-3 gap-2">
-        <SettingValue label="Rounds" value={String(snapshot.maxRounds)} />
-        <SettingValue label="Round time" value={`${snapshot.roundSeconds}s`} />
-        <SettingValue label="Power-ups" value={snapshot.powerUpMode} />
-      </div>
-    </div>
-  );
-}
+// function SharedGameSettings({ snapshot }: { snapshot: RoomSnapshot }) {
+//   return (
+//     <div
+//       className="mt-5 w-full max-w-sm rounded-2xl border border-white/10 bg-white/[.045] p-3 text-left"
+//       aria-label="Game settings"
+//     >
+//       <p className="text-[10px] font-black uppercase tracking-[.14em] text-[#b7ff45]">
+//         Game settings
+//       </p>
+//       <div className="mt-2 grid grid-cols-3 gap-2">
+//         <SettingValue label="Rounds" value={String(snapshot.maxRounds)} />
+//         <SettingValue label="Round time" value={`${snapshot.roundSeconds}s`} />
+//         <SettingValue label="Power-ups" value={snapshot.powerUpMode} />
+//       </div>
+//     </div>
+//   );
+// }
 
 function SettingValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-black/20 px-2.5 py-2">
-      <p className="text-[9px] font-black uppercase tracking-[.08em] text-white/30">{label}</p>
-      <p className="mt-0.5 truncate text-xs font-black capitalize text-white/75">{value}</p>
+      <p className="text-[9px] font-black uppercase tracking-[.08em] text-white/30">
+        {label}
+      </p>
+      <p className="mt-0.5 truncate text-xs font-black capitalize text-white/75">
+        {value}
+      </p>
     </div>
   );
 }
 
-function CalibrationStepPill({ number, label, state }: { number: string; label: string; state: "active" | "complete" | "upcoming" }) {
+function CalibrationStepPill({
+  number,
+  label,
+  state,
+}: {
+  number: string;
+  label: string;
+  state: "active" | "complete" | "upcoming";
+}) {
   return (
-    <div className={`flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-[11px] font-black uppercase tracking-[.08em] ${state === "active" ? "border-[#b7ff45]/35 bg-[#b7ff45]/12 text-[#b7ff45]" : state === "complete" ? "border-white/10 bg-white/[.055] text-white/65" : "border-white/8 bg-transparent text-white/25"}`}>
-      {state === "complete" ? <Check className="size-3.5" /> : <span className="font-mono">{number}</span>}{label}
+    <div
+      className={`flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-[11px] font-black uppercase tracking-[.08em] ${state === "active" ? "border-[#b7ff45]/35 bg-[#b7ff45]/12 text-[#b7ff45]" : state === "complete" ? "border-white/10 bg-white/[.055] text-white/65" : "border-white/8 bg-transparent text-white/25"}`}
+    >
+      {state === "complete" ? (
+        <Check className="size-3.5" />
+      ) : (
+        <span className="font-mono">{number}</span>
+      )}
+      {label}
     </div>
   );
 }
 
-function PhoneShell({ roomCode, status, latencyMs, color, children }: { roomCode: string; status: RoomConnectionStatus; latencyMs: number | null; color?: string; children: React.ReactNode }) {
+function PhoneShell({
+  roomCode,
+  status,
+  latencyMs,
+  color,
+  children,
+}: {
+  roomCode: string;
+  status: RoomConnectionStatus;
+  latencyMs: number | null;
+  color?: string;
+  children: React.ReactNode;
+}) {
   return (
     <main className="phone-shell min-h-dvh overflow-x-hidden bg-[#10120f] px-4 text-[#f5f5ec]">
       <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col">
         <header className="flex h-17 items-center justify-between border-b border-white/[.08]">
           <CursorTagLogo />
           <div className="flex items-center gap-2">
-            {latencyMs !== null && <span className={`rounded-full border px-2.5 py-1.5 font-mono text-[10px] font-black ${latencyMs <= 80 ? "border-[#b7ff45]/20 bg-[#b7ff45]/10 text-[#b7ff45]" : latencyMs <= 140 ? "border-amber-400/20 bg-amber-400/10 text-amber-300" : "border-[#ff5c5c]/20 bg-[#ff5c5c]/10 text-[#ff9292]"}`}>{latencyMs}ms</span>}
-            <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[.055] px-2.5 py-1.5 font-mono text-[10px] font-black tracking-[.1em] text-white/75 shadow-sm">{status === "connected" ? <Wifi className="size-3" style={{ color: color ?? "#9b87ff" }} /> : <WifiOff className="size-3 text-[#ff5c5c]" />}{roomCode}</span>
+            {latencyMs !== null && (
+              <span
+                className={`rounded-full border px-2.5 py-1.5 font-mono text-[10px] font-black ${latencyMs <= 80 ? "border-[#b7ff45]/20 bg-[#b7ff45]/10 text-[#b7ff45]" : latencyMs <= 140 ? "border-amber-400/20 bg-amber-400/10 text-amber-300" : "border-[#ff5c5c]/20 bg-[#ff5c5c]/10 text-[#ff9292]"}`}
+              >
+                {latencyMs}ms
+              </span>
+            )}
+            <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[.055] px-2.5 py-1.5 font-mono text-[10px] font-black tracking-[.1em] text-white/75 shadow-sm">
+              {status === "connected" ? (
+                <Wifi
+                  className="size-3"
+                  style={{ color: color ?? "#9b87ff" }}
+                />
+              ) : (
+                <WifiOff className="size-3 text-[#ff5c5c]" />
+              )}
+              {roomCode}
+            </span>
           </div>
         </header>
         {children}
@@ -779,5 +1150,12 @@ function PhoneShell({ roomCode, status, latencyMs, color, children }: { roomCode
 }
 
 function MotionError({ status }: { status: SensorStatus }) {
-  return <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#ff5c5c]/20 bg-[#ff5c5c]/10 p-3 text-left text-xs font-bold leading-relaxed text-[#ff9292]"><CircleAlert className="mt-0.5 size-4 shrink-0" />{status === "unsupported" ? "This browser does not expose motion sensors. Open the link in Safari on iPhone or Chrome on Android." : "Motion access was denied. Allow Motion & Orientation in your browser settings, then try again."}</div>;
+  return (
+    <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#ff5c5c]/20 bg-[#ff5c5c]/10 p-3 text-left text-xs font-bold leading-relaxed text-[#ff9292]">
+      <CircleAlert className="mt-0.5 size-4 shrink-0" />
+      {status === "unsupported"
+        ? "This browser does not expose motion sensors. Open the link in Safari on iPhone or Chrome on Android."
+        : "Motion access was denied. Allow Motion & Orientation in your browser settings, then try again."}
+    </div>
+  );
 }
