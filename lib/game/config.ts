@@ -4,7 +4,7 @@ export const GAME_CONFIG = {
   collisionRadius: 0.058,
   freezeMs: 600,
   tagImmunityMs: 2_000,
-  defaultRounds: 20,
+  defaultRounds: 15,
   roundOptions: [10, 15, 20, 30],
   defaultRoundSeconds: 20,
   roundSecondsOptions: [15, 20, 30],
